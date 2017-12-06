@@ -36,6 +36,8 @@ initialize_place_cells = function(n_units, n_inputs, initial_weight_value) {
     weights=weights,
     firing_rates=NULL
   )
+  
+  return(place_cells)
 }
 
 # calculates place cell firing rates
