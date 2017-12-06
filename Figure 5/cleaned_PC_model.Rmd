@@ -1,0 +1,230 @@
+
+Load methods that perform individual steps in the experiment.
+
+```{r}
+source("Methods_10-4-17.R")
+```
+
+Define a function that executes the simulation.
+
+```{r}
+source("Methods_10-4-17.R")
+
+simulation = function(learning_rule) {
+  # values to save
+  place_cell_list = list()
+  
+  # parameters
+  X = load_input() # grid cell firing rates
+  n_units = 2000 # number of place cells
+  n_inputs = 10000 # number of grid cells
+  initial_weight_value = 1/1200
+  
+  # day zero
+  place_cells = initialize_place_cells(n_units, n_inputs, initial_weight_value)
+  place_cells = calculate_firing_rates(place_cells, X)
+  place_cells = update_place_cell_weights(place_cells, X, learning_rule)
+  
+  place_cell_list[[1]] = place_cells # save place cells firing rates
+  
+  # reactivations
+  for (day in 1:30) {
+    place_cells = turnover(place_cells)
+    place_cells = calculate_firing_rates(place_cells, X)
+    place_cells = update_place_cell_weights(place_cells, X, learning_rule)
+    
+    place_cell_list[[day+1]] = place_cells # save place cells firing rates
+  }
+  
+  return(place_cell_list)
+}
+```
+
+Define a function that runs the simulation and extracts a dataframe with centroid positions.
+
+```{r}
+extract_centroids = function(place_cell_list) {
+  df_centroids = sapply(0:30, function(day) {
+    place_cells = place_cell_list[[day+1]]
+    centroids = get_centroids(place_cells$firing_rates)
+    df = data.frame(
+      Day = day,
+      Centroid = centroids,
+      Cell = 1:2000
+      )
+    return(df)
+    }, simplify = F) %>%
+    bind_rows()
+  return(df_centroids)
+}
+```
+
+Run the simulation and extract centroids.
+
+```{r}
+set.seed(1234)
+
+learning_rules = c("LTP & LTD", "LTP-only","LTD-only", "No learning")
+
+place_cell_lists = sapply(learning_rules, function(learning_rule) {
+  place_cell_list = simulation(learning_rule)
+}, simplify=F)
+
+df_centroids = sapply(seq_along(learning_rules), function(i) {
+  place_cell_list = place_cell_lists[[i]]
+  df_centroids = extract_centroids(place_cell_list)
+  df_centroids$Learning_rule = learning_rules[i]
+  return(df_centroids)
+}, simplify=F) %>%
+  bind_rows()
+```
+
+Extract place field offsets.
+
+```{r}
+df_recurring_centroids = df_centroids %>%
+  ddply("Learning_rule", function(df) {
+    original_PCs = df %>%
+      filter(Day == 0) %>%
+      filter(!is.na(Centroid)) %>%
+      {.$Cell}
+    filter(df, Cell %in% original_PCs)
+  }) %>%
+  na.omit()
+
+df_offset = df_recurring_centroids %>%
+  ddply(c("Day", "Cell", "Learning_rule"), function(df) {
+    original_centroid = 
+      df_centroids$Centroid[
+        df_centroids$Cell == df$Cell[1] & 
+          df_centroids$Day == 0 &
+            df_centroids$Learning_rule == df$Learning_rule[1]
+        ]
+    df = mutate(df, Offset = abs(Centroid - original_centroid))
+    return(df)
+  })
+```
+
+Create a dataframe with information to plot representative place cell firing rates.
+
+```{r}
+df_representative = sapply(seq_along(learning_rules), function(i) {
+  place_cell_list = place_cell_lists[[i]]
+  centroids = get_centroids(place_cell_list[[1]]$firing_rates)
+  df_representative = sapply(seq(0, 30, 5), function(day) {
+    df = place_cell_list[[day+1]]$firing_rates %>%
+      t() %>%
+      as.data.frame() %>%
+      mutate(Cell = 1:2000) %>%
+      mutate(Centroid = centroids) %>%
+      mutate(Index = rank(Centroid, ties.method="random")) %>%
+      melt(id.var=c("Centroid", "Index", "Cell")) %>%
+      dplyr::rename(Position=variable, Rate=value) %>%
+      mutate(Position=as.numeric(Position)) %>%
+      na.omit() %>%
+      mutate(Day = day)
+    return(df)
+    }, simplify = F) %>%
+    bind_rows()
+  df_representative$Learning_rule = learning_rules[i]
+  return(df_representative)
+}, simplify=F) %>%
+  bind_rows()
+```
+
+# Perform decoding experiment
+
+Open the file "cleaned_decoding.Rmd" in the current R session and run all chuncks. This will perform the decoding experiment.
+
+# Perform correlation experiment
+
+Open the file "cleaned_PC_model-correlations.Rmd" in the current R session and run all chuncks. This will perform the correlation experiment comparing synaptic potentials at new and lost synapses.
+
+# Plotting
+
+Generate individual plots and render a figure (figure 5 in the manuscript).
+
+```{r}
+g_offset = df_offset %>%
+  mutate(Learning_rule=factor(Learning_rule, levels=learning_rules)) %>%
+  ggplot(aes(Day, Offset, color=Learning_rule)) +
+    geom_line(stat="summary", fun.data="mean_se") +
+    geom_errorbar(stat="summary", fun.data="mean_se") +
+    labs(x="Time [days]", y="|Offset| [cm]") +
+    scale_color_manual(values=c("magenta", "springgreen3", "turquoise2", "brown"))
+
+g_recurring_PCs = df_recurring_centroids %>%
+  group_by(Day, Learning_rule) %>%
+  dplyr::count() %>%
+  ungroup() %>%
+  mutate(Learning_rule=factor(Learning_rule, levels=learning_rules)) %>%
+  ggplot(aes(Day, n, color=Learning_rule)) +
+    geom_line() +
+    coord_cartesian(ylim=c(0, 1000)) +
+    labs(x="Time [days]", y="Recurring\nPCs") +
+    scale_color_manual(values=c("magenta", "springgreen3", "turquoise2", "brown"))
+
+g_total_PCs = df_centroids %>%
+  na.omit() %>%
+  group_by(Day, Learning_rule) %>%
+  dplyr::count() %>%
+  ungroup() %>%
+  mutate(Learning_rule=factor(Learning_rule, levels=learning_rules)) %>%
+  ggplot(aes(Day, n, color=Learning_rule)) +
+    geom_line() +
+    coord_cartesian(ylim=c(0, 2000)) +
+    labs(x="Time [days]", y="Total PCs") +
+    scale_color_manual(values=c("magenta", "springgreen3", "turquoise2", "brown"))
+
+g_representative = df_representative %>%
+  mutate(Day = paste("Day: ", Day, sep="")) %>%
+  mutate(Day = factor(
+   Day, levels=paste("Day: ", seq(0, 30, 5), sep=""))) %>%
+  mutate(Learning_rule=factor(Learning_rule, levels=learning_rules)) %>%
+  ggplot(aes(Position, Index, z=Rate)) +
+    facet_grid(Learning_rule~Day, scales="free_y") +
+    stat_summary_2d(fun=function(x) mean(x), bins=c(99, 199)) +
+    scale_fill_distiller(palette="Spectral") +
+    scale_x_continuous(breaks=c(25, 75)) +
+    scale_y_continuous(breaks=c(0, 200, 400, 600)) +
+    labs(x="Position [cm]", y="PC index", fill="Firing rate") +
+    theme(panel.spacing = unit(.05, "lines"))
+
+theme_set(
+  theme_classic() + 
+    theme(
+      text=element_text(size=8),
+      strip.background = element_rect(fill=NA, color=NA),
+      strip.text = element_text(size=6)
+      )
+  )
+legend = get_legend(
+  g_offset +
+    theme(
+      legend.title=element_blank(),
+      legend.background = element_rect(fill=NA, color=NA)
+    ) +
+    guides(color=guide_legend(keywidth=.5, keyheight=.5))
+  )
+no_legend = theme(legend.position = "none")
+figure = ggdraw() +
+  draw_plot(g_offset+no_legend, x=0/3, y=2/3, width=1/3, height=1/3) +
+  draw_plot(g_total_PCs+no_legend, x=1/3, y=2/3, width=1/3, height=1/3) +
+  draw_plot(g_recurring_PCs+no_legend, x=2/3, y=2/3, width=1/3, height=1/3) +
+  draw_plot(legend, x=2.25/3, y=2.35/3, width=1/3, height=1/3) +
+  draw_plot(g_representative, x=0/3, y=0/3, width=2/3, height=2/3) +
+  draw_plot(g_correlations, x=2/3, y=1/3, width=1/3, height=1/3) +
+  draw_plot(g_decoding+no_legend, x=2/3, y=0/3, width=1/3, height=1/3) +
+  draw_plot_label(
+    LETTERS[1:6], 
+    x=c(0/3, 1/3, 2/3, 0/3, 2/3, 2/3), 
+    y=c(3/3, 3/3, 3/3, 2/3, 2/3, 1/3), 
+    size=10
+    )
+
+tiff("figure-5.tiff", width=6.18, height=4, units = "in", res=300)
+figure
+dev.off()
+```
+
+

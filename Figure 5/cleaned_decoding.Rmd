@@ -1,0 +1,58 @@
+```{r}
+# decoding
+get_error = function(place_cell_list) {
+  ens = reticulate::import("sklearn.ensemble")
+  classifier = ens$GradientBoostingClassifier()
+  
+  # fun
+  centroids = get_centroids(place_cell_list[[1]]$firing_rates)
+  idx = !is.na(centroids)
+  
+  X = place_cell_list[[1]]$firing_rates[,idx] %>% 
+    scale() %>% 
+    {.[is.na(.)] = 0; .}
+  Y = 1:100
+  classifier$fit(X, Y)
+  
+  error = sapply(0:30, function(day) {
+    Xi = place_cell_list[[day+1]]$firing_rates[,idx] %>% 
+      scale() %>% 
+      {.[is.na(.)] = 0; .}
+    y = classifier$predict(Xi)
+    error = mean(abs(y - Y))
+    return(error)
+  })
+  
+  return(error)
+}
+```
+
+```{r}
+decoding_experiment = function(learning_rule) {
+  place_cell_list = simulation(learning_rule)
+  error = get_error(place_cell_list)
+  df = data.frame(
+    Error=error,
+    Day=0:30,
+    Learning_rule=learning_rule
+    )
+  return(df)
+}
+
+set.seed(1234)
+params = rep(learning_rules, 10) # set to 10
+df_decoding = sapply(params, decoding_experiment, simplify=F) %>% 
+  bind_rows()
+```
+
+```{r}
+g_decoding = df_decoding %>%
+  mutate(Learning_rule=factor(Learning_rule, levels=learning_rules)) %>%
+  ggplot(aes(Day, Error, color=Learning_rule)) +
+  geom_line(stat="summary", fun.data="mean_se") +
+  geom_errorbar(stat="summary", fun.data="mean_se") +
+  scale_color_manual(values=c("magenta", "springgreen3", "turquoise2", "brown")) +
+  labs(x="Time [days]", y="Error [cm]")
+g_decoding
+```
+
