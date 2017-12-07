@@ -8,8 +8,6 @@ source("Methods_10-4-17.R")
 Define a function that executes the simulation.
 
 ```{r}
-source("Methods_10-4-17.R")
-
 simulation = function(learning_rule) {
   # values to save
   place_cell_list = list()
