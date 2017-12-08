@@ -77,9 +77,7 @@ figure = ggdraw() +
   draw_plot(g_bottom, x = 0, y = 0, width = 1, height = .5) +
   draw_plot_label(label = c("A", "B"), size = 10, x = c(0, 0), y = c(1, .5))
 
-tiff("FIGURE1.tiff", width = 3.09, height = 3, units = "in", res = 300, compression = "lzw")
 figure # Make plot
-dev.off()
 ```
 
 ```{r}
