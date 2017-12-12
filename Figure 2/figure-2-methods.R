@@ -17,17 +17,18 @@ make_cosines = function(n_cosines) {
 # run the simulation
 simulate = function(n_cosines, n_outputs, turnover, eta, pretraining=T, post_training=T) {
   # Initialize inputs and synaptic weights
-  input = make_cosines(n_cosines=n_cosines)
-  weights = replicate(n_outputs, runif(n_cosines, -1, 1))
-  replacement_input = make_cosines(n_cosines=turnover)
+  input = (make_cosines(n_cosines=n_cosines)+1)/2
+  weights = replicate(n_outputs, runif(n_cosines, -.5, 1))
+  replacement_input = (make_cosines(n_cosines=turnover)+1)/2
   
   # Activate the output units pre-turnover
   response = input %*% weights
+  response[response<0] = 0
   
   # Pre-training
   if (pretraining) {
-    dw = eta * t(input) %*% response
-    weights = weights + dw # update weights
+    dw = eta * t(input) %*% (response-mean(response))
+    weights = dw # update weights
   }
   
   # Save weights and inputs
@@ -36,15 +37,16 @@ simulate = function(n_cosines, n_outputs, turnover, eta, pretraining=T, post_tra
   
   # Synpase turnover
   input[,1:turnover] = replacement_input
-  weights[1:turnover,] = runif(turnover*n_outputs, -1, 1) # reset replaced weights
+  weights[1:turnover,] = runif(turnover*n_outputs, -.5, 1) # reset replaced weights
   
   # Activate the output units post-turnover
   response = input %*% weights
+  response[response<0] = 0
   
   # Post-training
   if (post_training) {
-    dw = eta * t(input) %*% response
-    weights = weights + dw
+    dw = eta * t(input) %*% (response-mean(response))
+    weights = dw
   }
   
   # Sum synaptic potentials across replaced inputs

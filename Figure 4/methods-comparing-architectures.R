@@ -34,6 +34,7 @@ create_network = function(n_units, n_inputs, n_patterns) {
 # Sum inputs and apply winner-takes-all process
 activate = function(net, activation_method, winner_quantile=.9) {
   net$y = np$dot(net$X, net$weights)
+  net$y[net$y < 0] = 0
   
   winner_takes_all = function(y, activation_method, winner_quantile=.9) {
     if (activation_method == "Winner-takes-all") {
@@ -63,7 +64,7 @@ update_weights = function(net, learning_rate=.1) {
 }
 
 # synapse turnover, replace synapses and update weights appropriately
-turnover = function(net, turnover=100, weight_range=c(-1, 1)) {
+turnover = function(net, turnover=100, weight_range=c(0, 1)) {
   synapses = net$synapses
   weights = net$weights
   

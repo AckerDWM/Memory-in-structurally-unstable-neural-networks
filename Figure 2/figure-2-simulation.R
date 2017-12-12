@@ -9,7 +9,7 @@ set.seed(1234)
 n_cosines = 100 # number of input units
 n_outputs = 1 # number of output units
 turnover = 50 # number of inputs replaced during turnover
-eta = 1e-2 # learning rate
+eta = 2e-2 # learning rate
 n_replicates = 500
 
 # Run simulation
@@ -44,22 +44,23 @@ df = data.frame(pre_post, pre, post, none) %>%
 figure = ggplot(df, aes(Correlation, color=Condition)) +
   geom_step(stat="ecdf") +
   # Themes
-  theme_tufte() +
+  theme_classic() +
   theme(
-    legend.position=c(.2, .8),
+    legend.position=c(.22, .8),
     legend.title = element_blank(),
-    text=element_text(family="sans", size=8),
-    axis.line = element_line()
+    text=element_text(size=8)
   ) +
   guides(color=guide_legend(keyheight=.5, keywidth=.5)) +
   # Colors
-  scale_color_manual(values=colorblind_pal()(4) %>% rev()) +
+  scale_color_brewer(palette="Dark2") +
   # Annotations
   geom_hline(yintercept=.5, linetype=2) +
   geom_vline(xintercept=0, linetype=2) +
   # Axis labels
   xlab(expression("r(PSPs"["new"]*",PSPs"["lost"]*")")) +
   ylab("Cumulative density")
+
+figure
 
 tiff("fig-2.tiff", width=3.09, height=2, units="in", res=300)
 figure

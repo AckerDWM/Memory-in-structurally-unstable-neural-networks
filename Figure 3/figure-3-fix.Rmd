@@ -115,6 +115,25 @@ reenter = function(net) {
   net$weights = new_weights
   return(net)
 }
+
+# this alternate version of the reentry function 
+# initializes the network in the vicinity of the attractor
+reenter_positive = function(net, I) {
+  n_units = nrow(net$weights)
+  correlated_input = .001*(I + runif(n_units, -2, 2))
+  net$membrane_potentials = correlated_input %>% matrix(1, n_units)
+  net$firing_rates = tanh(net$membrane_potentials)
+  for (i in 1:12) {
+    X = net$firing_rates
+    net$membrane_potentials = np$dot(X, net$weights)
+    net$firing_rates = tanh(net$membrane_potentials)
+  }
+  X = net$firing_rates
+  new_weights = np$dot(t(X), net$firing_rates)
+  new_weights[net$synapses == F] = 0
+  net$weights = new_weights
+  return(net)
+}
 ```
 
 Define a function that will run the simulation, returning a dataframe with r-squared values and parameters.
@@ -133,13 +152,13 @@ simulation = function(n_units, turnover_rate, p_connection) {
   indegree = degree(graph_obj, mode="in") %>% median()
   
   # Reactivations and statistics
-  r_squared_1 = 0 # to save
+  r_1 = 0 # to save
   for (i in 1:100) {
     net = turnover(net, turnover_rate=turnover_rate)
-    net = reenter(net)
-    if (i == 1) r_squared_1 = cor(c(I), c(net$firing_rates))^2 # save
+    net = reenter_positive(net, I)
+    if (i == 1) r_1 = cor(c(I), c(net$firing_rates)) # save
   }
-  r_squared_100 = cor(c(I), c(net$firing_rates))^2
+  r_100 = cor(c(I), c(net$firing_rates))
   
   # Collect results
   df = data.frame(
@@ -147,7 +166,7 @@ simulation = function(n_units, turnover_rate, p_connection) {
     turnover_rate = turnover_rate,
     p_connection = p_connection,
     indegree = indegree,
-    r_squared = c(r_squared_1, r_squared_100),
+    r = c(r_1, r_100),
     reactivation = c("1", "100"),
     stringsAsFactors = F
     )
@@ -173,13 +192,13 @@ df_result_pconnection = sapply(1:n, function(i) {
   bind_rows()
 
 g_pconnection = df_result_pconnection %>%
-  ggplot(aes(p_connection, r_squared, color=reactivation, shape=reactivation)) +
+  ggplot(aes(p_connection, r, color=reactivation, shape=reactivation)) +
   geom_point() +
   geom_smooth(aes(fill=reactivation), method="loess", span=.25, color=NA) +
-  coord_cartesian(ylim=c(0, 1)) +
+  coord_cartesian(ylim=c(-1, 1)) +
   scale_color_manual(values=c("blue3", "red3")) +
   scale_fill_manual(values=c("blue3", "red3")) +
-  labs(x="Probability of connection", y=TeX("r^2"))
+  labs(x="Probability of connection", y="r")
 g_pconnection
 ```
 
@@ -201,13 +220,13 @@ df_result_turnover = sapply(1:n, function(i) {
   bind_rows()
 
 g_turnover = df_result_turnover %>%
-  ggplot(aes(turnover_rate*100, r_squared, color=reactivation, shape=reactivation)) +
+  ggplot(aes(turnover_rate*100, r, color=reactivation, shape=reactivation)) +
   geom_point() +
   geom_smooth(aes(fill=reactivation), method="loess", span=.25, color=NA) +
-  coord_cartesian(ylim=c(0, 1)) +
+  coord_cartesian(ylim=c(-1, 1)) +
   scale_color_manual(values=c("blue3", "red3")) +
   scale_fill_manual(values=c("blue3", "red3")) +
-  labs(x="Turnover rate [%]", y=TeX("r^2"))
+  labs(x="Turnover rate [%]", y="r")
 g_turnover
 ```
 
@@ -229,13 +248,13 @@ df_result_nunits = sapply(1:n, function(i) {
   bind_rows()
 
 g_nunits = df_result_nunits %>%
-  ggplot(aes(n_units, r_squared, color=reactivation, shape=reactivation)) +
+  ggplot(aes(n_units, r, color=reactivation, shape=reactivation)) +
   geom_point() +
   geom_smooth(aes(fill=reactivation), method="loess", span=.25, color=NA) +
-  coord_cartesian(ylim=c(0, 1)) +
+  coord_cartesian(ylim=c(-1, 1)) +
   scale_color_manual(values=c("blue3", "red3")) +
   scale_fill_manual(values=c("blue3", "red3")) +
-  labs(x="# of units", y=TeX("r^2"))
+  labs(x="# of units", y="r")
 g_nunits
 ```
 
@@ -258,13 +277,16 @@ df_result_indegree = sapply(1:n, function(i) {
 
 g_indegree = df_result_indegree %>%
   filter(reactivation == "100") %>%
-  ggplot(aes(indegree, turnover_rate*100, color=r_squared)) +
+  ggplot(aes(indegree, turnover_rate*100, color=r)) +
   geom_point() +
-  scale_color_distiller(palette="Spectral") +
+  scale_color_distiller(palette="Spectral", limits=c(-1, 1)) + ####
   scale_y_continuous(limits=c(0, 100)) +
   scale_x_sqrt(breaks=c(10, 100, 500)) +
-  labs(x="Median in-degree", y="Turnover rate [%]", color=TeX("r^2"))
+  labs(x="Median in-degree", y="Turnover rate [%]", color="r")
 g_indegree
+
+df_result_indegree %>%
+  filter(r >= .9, turnover_rate>=.8, reactivation==100)
 ```
 
 Define a function that generates representative images of the networks.
@@ -282,7 +304,7 @@ simulation_representative = function(n_units, turnover_rate, p_connection) {
   firing_rates_activation_1 = NULL # to save
   for (i in 1:100) {
     net = turnover(net, turnover=turnover_rate)
-    net = reenter(net)
+    net = reenter_positive(net, I)
     if (i == 1) firing_rates_activation_1 = net$firing_rates # save
   }
   
@@ -319,7 +341,7 @@ df_rep = bind_rows(
 g_rep_nunits = ggplot(df_rep, aes(Var1, Var2, fill=value)) +
   facet_grid(Reactivation~n_units, switch="y") +
   geom_raster() +
-  scale_fill_gradient2(high="black", mid="white", low="wheat3") +
+  scale_fill_distiller(palette="Greys", direction=1) +
   coord_equal() +
   theme_classic() +
   theme(
@@ -346,7 +368,7 @@ df_rep = bind_rows(
 g_rep_turnover = ggplot(df_rep, aes(Var1, Var2, fill=value)) +
   facet_grid(Reactivation~I(turnover_rate*100), switch="y") +
   geom_raster() +
-  scale_fill_gradient2(high="black", mid="white", low="wheat3") +
+  scale_fill_distiller(palette="Greys", direction=1, breaks=c(-1, 1), labels=c("Min.", "Max.")) +
   coord_equal() +
   theme_classic() +
   theme(
@@ -373,7 +395,7 @@ df_rep = bind_rows(
 g_rep_pconnection = ggplot(df_rep, aes(Var1, Var2, fill=value)) +
   facet_grid(Reactivation~p_connection, switch="y") +
   geom_raster() +
-  scale_fill_gradient2(high="black", mid="white", low="wheat3") +
+  scale_fill_distiller(palette="Greys", direction=1) +
   coord_equal() +
   theme_classic() +
   theme(
@@ -391,17 +413,18 @@ g_rep_pconnection
 Define a function that generates representative changes in membrane potentials.
 
 ```{r}
-reenter_return_firing_rates = function(net) {
+reenter_return_firing_rates = function(net, I) {
   n_units = nrow(net$weights)
-  net$membrane_potentials = runif(n_units, min=-0.004, max=0.004) %>% matrix(1, n_units)
+  correlated_input = .001*(I + runif(n_units, -2, 2))
+  net$membrane_potentials = correlated_input %>% matrix(1, n_units)
   net$firing_rates = tanh(net$membrane_potentials)
-  net$firing_rates_all_timesteps = matrix(0, 13, n_units)
-  net$firing_rates_all_timesteps[1,] = net$firing_rates
+  net$membrane_potentials_all_timesteps = matrix(0, 13, n_units)
+  net$membrane_potentials_all_timesteps[1,] = net$membrane_potentials
   for (i in 1:12) {
     X = net$firing_rates
     net$membrane_potentials = np$dot(X, net$weights)
     net$firing_rates = tanh(net$membrane_potentials)
-    net$firing_rates_all_timesteps[i+1,] = net$firing_rates
+    net$membrane_potentials_all_timesteps[i+1,] = net$membrane_potentials
   }
   X = net$firing_rates
   new_weights = np$dot(t(X), net$firing_rates)
@@ -419,95 +442,70 @@ simulation_dVm = function(n_units, turnover_rate, p_connection) {
   net = train_network(net, I)
   
   # Reactivations and statistics
-  firing_rates = matrix(0, 1, n_units) # to save
+  membrane_potentials = matrix(0, 1, n_units) # to save
   for (i in 1:5) {
     net = turnover(net, turnover=turnover_rate)
-    net = reenter_return_firing_rates(net)
-    firing_rates = rbind(firing_rates, net$firing_rates_all_timesteps) # save
+    net = reenter_return_firing_rates(net, I)
+    membrane_potentials = rbind(membrane_potentials, net$membrane_potentials_all_timesteps) # save
   }
-  r_squared = apply(firing_rates, 1, function(rate) cor(rate, c(I))^2)
   
   # Gather results
   result_list = list(
-    firing_rates = firing_rates,
-    r_squared = r_squared
+    firing_rates = membrane_potentials
     )
   
   return(result_list)
 }
 ```
 
+
 ```{r}
 set.seed(2384823)
 
 n_units = 100
 
-results_list = simulation_dVm(n_units=n_units, turnover_rate=.7, p_connection=.2)
+results_list = simulation_dVm(n_units=n_units, turnover_rate=.73, p_connection=.2)
 for (i in 1:nrow(results_list$firing_rates)) {
   if ((i-1) %% 13 == 0) {
     results_list$firing_rates[i,] = rep(NA, n_units)
-    results_list$r_squared[i] = NA
   }
 }
 df_unstable = results_list$firing_rates %>%
   diff() %>%
   melt() %>%
   mutate(stability="Unstable")
-df_r_unstable = data.frame(
-  x=1:length(results_list$r_squared), 
-  y=results_list$r_squared*2-1,
-  stability="Unstable"
-)
 
 ##
 results_list = simulation_dVm(n_units=n_units, turnover_rate=.1, p_connection=.2)
 for (i in 1:nrow(results_list$firing_rates)) {
   if ((i-1) %% 13 == 0) {
     results_list$firing_rates[i,] = rep(NA, n_units)
-    results_list$r_squared[i] = NA
   }
 }
 df_stable = results_list$firing_rates %>%
   diff() %>%
   melt() %>%
   mutate(stability="Stable")
-df_r_stable = data.frame(
-  x=1:length(results_list$r_squared), 
-  y=results_list$r_squared*2-1,
-  stability="Stable"
-)
 
 ##
 results_list = simulation_dVm(n_units=n_units, turnover_rate=0, p_connection=.2)
 for (i in 1:nrow(results_list$firing_rates)) {
   if ((i-1) %% 13 == 0) {
     results_list$firing_rates[i,] = rep(NA, n_units)
-    results_list$r_squared[i] = NA
   }
 }
 df_no_turnover = results_list$firing_rates %>%
   diff() %>%
   melt() %>%
   mutate(stability="Zero\nturnover")
-df_r_no_turnover = data.frame(
-  x=1:length(results_list$r_squared), 
-  y=results_list$r_squared*2-1,
-  stability="Zero\nturnover"
-)
-df_r = bind_rows(df_r_stable, df_r_unstable, df_r_no_turnover)
+
 g_attractor_dynamics = bind_rows(df_stable, df_unstable, df_no_turnover) %>%
   ggplot(aes(Var1, value, group=Var2)) +
   facet_grid(stability~.) +
   annotate("point", x=seq(1, 13*5, 13), y=0.2, shape=25, size=1, fill="black") +
   geom_line(size=.1) +
-  labs(x="Time step", y=TeX("$\\Delta$ Firing rate"))
-  # geom_line(data=df_r, inherit.aes = F, aes(x=x, y=y), color="purple") +
-  # scale_y_continuous(sec.axis = sec_axis(~(.+1)/2, name=TeX("r^2"))) +
-  # theme(
-  #   axis.text.y.right = element_text(color="purple"),
-  #   axis.title.y.right = element_text(color="purple"),
-  #   strip.placement = "outside"
-  #   )
+  scale_y_continuous(breaks=c(-10, 10)) +
+  labs(x="Time step", y=TeX("$\\Delta$ u"))
 g_attractor_dynamics
 ```
 
@@ -517,7 +515,7 @@ g_input = I %>%
   melt() %>%
   ggplot(aes(Var1, Var2, fill=value)) +
     geom_raster() +
-    scale_fill_gradient2(high="black", mid="white", low="wheat3") +
+    scale_fill_distiller(palette="Greys", direction=1) +
     coord_equal() +
     theme_classic() +
     theme(
@@ -528,10 +526,10 @@ g_input = I %>%
       strip.background = element_blank(),
       plot.title = element_text(hjust = 0.5, vjust=-2),
       legend.position = "none",
-      title = element_text(size=8),
+      title = element_text(size=6),
       plot.background = element_rect(fill=NA, color=NA)
       ) +
-    ggtitle("Input")
+    ggtitle("Target")
 g_input
 ```
 
@@ -562,6 +560,7 @@ figure = ggdraw() +
   draw_plot(g_nunits + no_legend, x=.6, y=2/3, width=.3, height=1/3) +
   draw_plot(legend_top, x=.88, y=2/3, width=.1, height=1/3) +
   draw_plot(g_input, x=1.2/24, y=2.25/3, width=.15, height=.15) +
+  #draw_plot(g_u0, x=2.2/24, y=2.25/3, width=.15, height=.15) +
   # middle row
   draw_plot(g_rep_turnover + no_legend, x=0, y=1/3, width=.3, height=1/3) +
   draw_plot(g_rep_pconnection + no_legend, x=.3, y=1/3, width=.3, height=1/3) +
@@ -578,7 +577,7 @@ figure = ggdraw() +
     size=10
     )
 
-tiff("figure-3.tiff", width=6.18, height=5, units="in", res=300)
+tiff("figure-3-in-basin.tiff", width=6.18, height=5, units="in", res=300)
 figure
 dev.off()
 ```
