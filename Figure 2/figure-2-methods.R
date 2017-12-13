@@ -2,7 +2,7 @@ library(dplyr)
 
 # generate random cosine series
 make_cosines = function(n_cosines) {
-  x = seq(0, 2*pi, length=100)
+  x = seq(0, 2*pi-pi/50, length=100)
   
   period = runif(n_cosines, min=pi/4, max=2*pi)
   phase = runif(n_cosines, min=0, max=2*pi)

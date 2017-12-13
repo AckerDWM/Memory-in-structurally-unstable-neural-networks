@@ -100,36 +100,19 @@ turnover = function(net, turnover_rate, keep_indegrees=F) {
 Define a function that will perform reactivation. One reactivation consists of initialization with random membrane potentials, updating Vm for 12 time steps, then updating weights.
 
 ```{r}
-reenter = function(net) {
-  n_units = nrow(net$weights)
-  net$membrane_potentials = runif(n_units, min=-0.004, max=0.004) %>% matrix(1, n_units)
-  net$firing_rates = tanh(net$membrane_potentials)
-  for (i in 1:12) {
-    X = net$firing_rates
-    net$membrane_potentials = np$dot(X, net$weights)
-    net$firing_rates = tanh(net$membrane_potentials)
-  }
-  X = net$firing_rates
-  new_weights = np$dot(t(X), net$firing_rates)
-  new_weights[net$synapses == F] = 0
-  net$weights = new_weights
-  return(net)
-}
+sigmoid = function(x) 1 / (1 + exp(-2*x))
 
-# this alternate version of the reentry function 
-# initializes the network in the vicinity of the attractor
-reenter_positive = function(net, I) {
+reenter_positive_sigmoid = function(net, I) {
   n_units = nrow(net$weights)
-  correlated_input = .001*(I + runif(n_units, -2, 2))
-  net$membrane_potentials = correlated_input %>% matrix(1, n_units)
-  net$firing_rates = tanh(net$membrane_potentials)
+  net$membrane_potentials = runif(n_units, -.004, .004) %>% matrix(1, n_units)
+  net$firing_rates = sigmoid(net$membrane_potentials)
   for (i in 1:12) {
     X = net$firing_rates
     net$membrane_potentials = np$dot(X, net$weights)
-    net$firing_rates = tanh(net$membrane_potentials)
+    net$firing_rates = sigmoid(net$membrane_potentials)
   }
-  X = net$firing_rates
-  new_weights = np$dot(t(X), net$firing_rates)
+  X = net$firing_rates*2-1
+  new_weights = np$dot(t(X), (net$firing_rates*2-1))
   new_weights[net$synapses == F] = 0
   net$weights = new_weights
   return(net)
@@ -142,7 +125,6 @@ Define a function that will run the simulation, returning a dataframe with r-squ
 # Simulation function
 simulation = function(n_units, turnover_rate, p_connection) {
   
-  # Initialization and training
   net = create_network(n_units=n_units, p_connection=p_connection)
   I = load_memory_image("training-images/creeper.png", size=n_units) %>% matrix(1, n_units)
   net = train_network(net, I)
@@ -155,7 +137,7 @@ simulation = function(n_units, turnover_rate, p_connection) {
   r_1 = 0 # to save
   for (i in 1:100) {
     net = turnover(net, turnover_rate=turnover_rate)
-    net = reenter_positive(net, I)
+    net = reenter_positive_sigmoid(net, I)
     if (i == 1) r_1 = cor(c(I), c(net$firing_rates)) # save
   }
   r_100 = cor(c(I), c(net$firing_rates))
@@ -170,6 +152,7 @@ simulation = function(n_units, turnover_rate, p_connection) {
     reactivation = c("1", "100"),
     stringsAsFactors = F
     )
+  
   return(df)
 }
 ```
@@ -286,7 +269,7 @@ g_indegree = df_result_indegree %>%
 g_indegree
 
 df_result_indegree %>%
-  filter(r >= .9, turnover_rate>=.8, reactivation==100)
+  filter(r >= .9, turnover_rate>=.75, reactivation==100)
 ```
 
 Define a function that generates representative images of the networks.
@@ -304,7 +287,7 @@ simulation_representative = function(n_units, turnover_rate, p_connection) {
   firing_rates_activation_1 = NULL # to save
   for (i in 1:100) {
     net = turnover(net, turnover=turnover_rate)
-    net = reenter_positive(net, I)
+    net = reenter_positive_sigmoid(net, I)
     if (i == 1) firing_rates_activation_1 = net$firing_rates # save
   }
   
@@ -341,7 +324,7 @@ df_rep = bind_rows(
 g_rep_nunits = ggplot(df_rep, aes(Var1, Var2, fill=value)) +
   facet_grid(Reactivation~n_units, switch="y") +
   geom_raster() +
-  scale_fill_distiller(palette="Greys", direction=1) +
+  scale_fill_distiller(palette="Greys", direction=1, limits=c(0, 1)) +
   coord_equal() +
   theme_classic() +
   theme(
@@ -368,7 +351,7 @@ df_rep = bind_rows(
 g_rep_turnover = ggplot(df_rep, aes(Var1, Var2, fill=value)) +
   facet_grid(Reactivation~I(turnover_rate*100), switch="y") +
   geom_raster() +
-  scale_fill_distiller(palette="Greys", direction=1, breaks=c(-1, 1), labels=c("Min.", "Max.")) +
+  scale_fill_distiller(palette="Greys", direction=1, limits=c(0, 1)) +
   coord_equal() +
   theme_classic() +
   theme(
@@ -395,7 +378,7 @@ df_rep = bind_rows(
 g_rep_pconnection = ggplot(df_rep, aes(Var1, Var2, fill=value)) +
   facet_grid(Reactivation~p_connection, switch="y") +
   geom_raster() +
-  scale_fill_distiller(palette="Greys", direction=1) +
+  scale_fill_distiller(palette="Greys", direction=1, limits=c(0, 1)) +
   coord_equal() +
   theme_classic() +
   theme(
@@ -413,21 +396,23 @@ g_rep_pconnection
 Define a function that generates representative changes in membrane potentials.
 
 ```{r}
+# 
+sigmoid = function(x) 1 / (1 + exp(-2*x))
+
 reenter_return_firing_rates = function(net, I) {
   n_units = nrow(net$weights)
-  correlated_input = .001*(I + runif(n_units, -2, 2))
-  net$membrane_potentials = correlated_input %>% matrix(1, n_units)
-  net$firing_rates = tanh(net$membrane_potentials)
+  net$membrane_potentials = runif(n_units, -.004, .004) %>% matrix(1, n_units)
+  net$firing_rates = sigmoid(net$membrane_potentials)
   net$membrane_potentials_all_timesteps = matrix(0, 13, n_units)
   net$membrane_potentials_all_timesteps[1,] = net$membrane_potentials
   for (i in 1:12) {
     X = net$firing_rates
     net$membrane_potentials = np$dot(X, net$weights)
-    net$firing_rates = tanh(net$membrane_potentials)
+    net$firing_rates = sigmoid(net$membrane_potentials)
     net$membrane_potentials_all_timesteps[i+1,] = net$membrane_potentials
   }
-  X = net$firing_rates
-  new_weights = np$dot(t(X), net$firing_rates)
+  X = net$firing_rates*2-1
+  new_weights = np$dot(t(X), (net$firing_rates*2-1))
   new_weights[net$synapses == F] = 0
   net$weights = new_weights
   return(net)
@@ -446,12 +431,13 @@ simulation_dVm = function(n_units, turnover_rate, p_connection) {
   for (i in 1:5) {
     net = turnover(net, turnover=turnover_rate)
     net = reenter_return_firing_rates(net, I)
-    membrane_potentials = rbind(membrane_potentials, net$membrane_potentials_all_timesteps) # save
+    new_membrane_potentials = net$membrane_potentials_all_timesteps
+    membrane_potentials = rbind(membrane_potentials, new_membrane_potentials) # save
   }
   
   # Gather results
   result_list = list(
-    firing_rates = membrane_potentials
+    firing_rates = membrane_potentials[2:nrow(membrane_potentials),]
     )
   
   return(result_list)
@@ -460,52 +446,52 @@ simulation_dVm = function(n_units, turnover_rate, p_connection) {
 
 
 ```{r}
-set.seed(2384823)
+set.seed(238483)
 
 n_units = 100
 
-results_list = simulation_dVm(n_units=n_units, turnover_rate=.73, p_connection=.2)
-for (i in 1:nrow(results_list$firing_rates)) {
+results_list = simulation_dVm(n_units=n_units, turnover_rate=.8, p_connection=.2)
+dV = results_list$firing_rates %>% sigmoid() %>% diff() %>% {rbind(rep(0, n_units), .)}
+for (i in 1:nrow(dV)) {
   if ((i-1) %% 13 == 0) {
-    results_list$firing_rates[i,] = rep(NA, n_units)
+    dV[i,] = rep(NA, n_units)
   }
 }
-df_unstable = results_list$firing_rates %>%
-  diff() %>%
+df_unstable = dV %>%
   melt() %>%
   mutate(stability="Unstable")
 
 ##
 results_list = simulation_dVm(n_units=n_units, turnover_rate=.1, p_connection=.2)
-for (i in 1:nrow(results_list$firing_rates)) {
+dV = results_list$firing_rates %>% sigmoid() %>% diff() %>% {rbind(rep(0, n_units), .)}
+for (i in 1:nrow(dV)) {
   if ((i-1) %% 13 == 0) {
-    results_list$firing_rates[i,] = rep(NA, n_units)
+    dV[i,] = rep(NA, n_units)
   }
 }
-df_stable = results_list$firing_rates %>%
-  diff() %>%
+df_stable = dV %>%
   melt() %>%
   mutate(stability="Stable")
 
 ##
 results_list = simulation_dVm(n_units=n_units, turnover_rate=0, p_connection=.2)
-for (i in 1:nrow(results_list$firing_rates)) {
+dV = results_list$firing_rates %>% sigmoid() %>% diff() %>% {rbind(rep(0, n_units), .)}
+for (i in 1:nrow(dV)) {
   if ((i-1) %% 13 == 0) {
-    results_list$firing_rates[i,] = rep(NA, n_units)
+    dV[i,] = rep(NA, n_units)
   }
 }
-df_no_turnover = results_list$firing_rates %>%
-  diff() %>%
+df_no_turnover = dV %>%
   melt() %>%
   mutate(stability="Zero\nturnover")
 
 g_attractor_dynamics = bind_rows(df_stable, df_unstable, df_no_turnover) %>%
   ggplot(aes(Var1, value, group=Var2)) +
   facet_grid(stability~.) +
-  annotate("point", x=seq(1, 13*5, 13), y=0.2, shape=25, size=1, fill="black") +
+  annotate("point", x=seq(1, 13*5, 13), y=0.1, shape=25, size=.7, fill="black") +
   geom_line(size=.1) +
-  scale_y_continuous(breaks=c(-10, 10)) +
-  labs(x="Time step", y=TeX("$\\Delta$ u"))
+  scale_y_continuous(breaks=c(-.5, 0, .5)) +
+  labs(x="Time step", y=TeX("$\\Delta$ Norm. firing rate"))
 g_attractor_dynamics
 ```
 
@@ -551,7 +537,7 @@ legend_top = get_legend(
       shape="Reactivation #"
       )
   )
-legend_middle = get_legend(g_rep_turnover)
+legend_middle = get_legend(g_rep_turnover+labs(fill="Normalized\nfiring rate"))
 no_legend = theme(legend.position = "none")
 figure = ggdraw() +
   # top row
@@ -577,7 +563,7 @@ figure = ggdraw() +
     size=10
     )
 
-tiff("figure-3-in-basin.tiff", width=6.18, height=5, units="in", res=300)
+tiff("figure-3.tiff", width=6.18, height=5, units="in", res=300)
 figure
 dev.off()
 ```
