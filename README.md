@@ -4,5 +4,5 @@ This repo contains code associated with the manuscript "Memory in structurally u
 
 -- *This repo is dated* --
 
-A new version of the manuscript, entitled "Stable memory and computation in randomly rewiring neural networks"
-by Daniel Acker, Suzanne Paradis, and Paul Miller, will be available shortly through bioRxiv.
+The current version of the manuscript, entitled "Stable memory and computation in randomly rewiring neural networks"
+by Daniel Acker, Suzanne Paradis, and Paul Miller, is available bioRxiv: https://doi.org/10.1101/367011.
