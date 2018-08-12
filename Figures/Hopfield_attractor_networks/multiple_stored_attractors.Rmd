@@ -1,0 +1,127 @@
+
+```{r}
+set.seed(8472)
+```
+
+
+```{r}
+train_n = function(net, I) {
+  tau_w = 1000
+  n_units = nrow(net$weights)
+  net$membrane_potentials = runif(n_units, -1, 1) %>% matrix(1, n_units)
+  net$firing_rates = sigmoid(net$membrane_potentials)
+  for (i in 1:100) {
+    for (I_i in I) {
+      for (j in 1:12) {
+        X = net$firing_rates
+        net$membrane_potentials = np$dot(X, net$weights) + I_i*80
+        net$firing_rates = sigmoid(net$membrane_potentials)
+        X = net$firing_rates*2-1
+        new_weights = 
+          net$weights + (-gamma*net$weights + eta*np$dot(t(X), X)) / tau_w
+        new_weights[net$synapses == F] = 0
+        net$weights = new_weights
+      }
+    }
+  }
+  return(net)
+}
+```
+
+```{r}
+n_units = 400
+p_connection = .5
+
+eta = 1
+tau_u = 1
+tau_w = 1000
+gamma = 1
+
+net = create_network(n_units=n_units, p_connection=p_connection)
+net$weights = matrix(0, n_units, n_units)
+
+n_attractors = 3
+I = 
+  lapply(1:n_attractors, function(n) {
+    rbinom(n_units, 1, .5) %>% {.[.==0]=-1;.} %>% matrix(1, n_units)
+  })
+
+net_trained = train_n(net, I=I)
+```
+
+```{r}
+reenter_multimem = function(net, I, tau_w) {
+  cors = rep(0, length(I)) ##
+  n_units = nrow(net$weights)
+  for (i in 1:length(I)) {
+    I_i = I[[i]] %>% { . + runif(n_units, -2.5, 2.5) } %>% tanh() # mean cor of .5 with pattern
+    net$membrane_potentials = I_i ####
+    net$firing_rates = sigmoid(net$membrane_potentials)
+    for (j in 1:12) {
+      X = net$firing_rates
+      net$membrane_potentials = np$dot(X, net$weights)
+      net$firing_rates = sigmoid(net$membrane_potentials)
+    }
+    X = net$firing_rates*2-1
+    new_weights = 
+      net$weights + (-gamma*net$weights + eta*np$dot(t(X), (net$firing_rates*2-1))) / (tau_w)
+    new_weights[net$synapses == F] = 0
+    net$weights = new_weights
+    cors[i] = cor(c(I[[i]]), c(net$firing_rates))
+  }
+  return(list(net=net, cors=cors))
+}
+```
+
+```{r, fig.height=1, fig.width=2}
+turnover_rate = .095
+tau_w = 22
+
+n_reps = c(1, 2) # reactivations / day
+df = 
+  sapply(n_reps, function(n_reps_i) {
+    net = net_trained
+    cors = list()
+    for (i in 1:100) {
+      for (j in 1:n_reps_i) {
+        net_cors = reenter_multimem(net, I=I, tau_w=tau_w)
+        net = net_cors$net
+      }
+      net = turnover(net, turnover_rate=turnover_rate)
+      cors[[i]] = net_cors$cors
+    }
+    
+    df = do.call(rbind, cors) %>%
+      as.data.frame() %>%
+      {names(.)=LETTERS[1:length(I)];.} %>%
+      mutate(n_reps = n_reps_i) %>%
+      mutate(Time = 1:100)
+    
+    df
+    
+  }, simplify=F) %>%
+  bind_rows()
+
+g_epochs = 
+  df %>%
+  tidyr::gather(Target, Correlation, -n_reps, -Time)  %>%
+  dplyr::rename(`Cycles/epoch`=n_reps) %>%
+  ggplot(aes(Time, Correlation, group=Target, color=Target)) +
+  facet_grid(~`Cycles/epoch`, labeller=label_both) +
+  geom_line() +
+  coord_cartesian(ylim=c(-1.2, 1.2)) +
+  ylab("Attractor integrity") +
+  xlab("Epoch index") +
+  geom_hline(yintercept=0, lty=2) +
+  theme(
+    legend.margin = margin(0,0,0,0),
+    legend.box.margin = margin(0,0,0,0)
+    )
+
+theme_set(theme_classic()+theme(text=element_text(size=8)))
+g_epochs
+```
+
+
+
+

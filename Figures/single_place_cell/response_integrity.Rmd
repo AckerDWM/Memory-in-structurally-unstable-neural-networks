@@ -1,0 +1,169 @@
+```{r}
+simulate_response = function(
+  n_cosines, n_outputs, turnover, eta, pretraining=T, post_training=T) {
+  
+  threshold_function = function(x) {x[x - quantile(x, .9) < 0]=0;x}
+  
+  # Initialize inputs and synaptic weights
+  orginal_input_idx = sample(1:10000, n_cosines)
+  new_input_idx = sample(which(!(1:10000) %in% orginal_input_idx), turnover)
+  input = all_grid_cells[,orginal_input_idx]
+  weights = replicate(n_outputs, sample(synaptic_strength_pool, size=n_cosines, replace=T))
+  replacement_input = all_grid_cells[,new_input_idx]
+  
+  # save original weights
+  df_weights = data.frame(original_weights = c(weights))
+  
+  # Activate the output units pre-turnover
+  response = input %*% weights
+  response %<>% apply(2, threshold_function)
+  
+  # Pre-training
+  if (pretraining) {
+    dw = np$dot(t(input), response)
+    weights = weights + eta*dw
+    weights %<>% apply(2, function(x) 148.7*x/sum(x))
+  }
+  
+  # Save trained weights
+  df_weights$trained_weights = c(weights)
+  
+  # Save weights and inputs
+  inputs_pre_turnover = input
+  weights_pre_turnover = weights
+  
+  # Synpase turnover
+  input[,1:turnover] = replacement_input
+  weights[1:turnover,] = sample(synaptic_strength_pool, size=turnover*n_outputs, replace=T)
+
+  # Activate the output units post-turnover
+  response = input %*% weights
+  response %<>% apply(2, threshold_function)
+  
+  # Post-training
+  if (post_training) {
+    dw = np$dot(t(input), response)
+    weights = weights + eta*dw
+    weights %<>% apply(2, function(x) 148.7*x/sum(x))
+  }
+  
+  # Save trained/post-turnover weights
+  df_weights$post_turnover_weights = c(weights)
+  
+  # Sum synaptic potentials across replaced inputs
+  PSP_pre_turnover = inputs_pre_turnover %*% weights_pre_turnover
+  PSP_post_turnover = input %*% weights
+  
+  PSP_pre_turnover %<>% apply(2, threshold_function)
+  PSP_post_turnover %<>% apply(2, threshold_function)
+  
+  # Get correlation between PSPs pre and post-turnover
+  correlation = cor(c(PSP_pre_turnover), c(PSP_post_turnover))
+
+  return(list(w=df_weights, c=correlation))
+}
+```
+
+```{r, fig.height=2, fig.width=4}
+set.seed(293924)
+
+turnover = 1200*seq(.1, 1, .1)
+
+result = sapply(turnover, function(turnover) {
+  replicate(
+    100, 
+    {
+      simulate_response(
+        n_cosines=1200, n_outputs=1, turnover=turnover, 
+        eta=1e-4, pretraining=T, post_training=T
+      )$c
+    }
+  )
+})
+
+colnames(result) = turnover
+g_response =
+  result %>%
+  melt() %>%
+  ggplot(aes(factor(100*Var2/1200), value)) +
+  ggforce::geom_sina(shape=16, size=.2) +
+  xlab("% of grid-cell-to-place-cell synapses replaced") +
+  ylab("Response integrity\n(sess. 1 vs. sess. 2)") +
+  ylim(-.4, 1) +
+  geom_hline(yintercept=0, lty=2) +
+  geom_hline(yintercept = 0, lty=2) +
+  geom_boxplot(fill=NA, outlier.shape = NA)
+g_response
+```
+
+```{r, fig.height=2, fig.width=2}
+set.seed(953214)
+
+pretraining = c(T, F)
+
+result = sapply(pretraining, function(pretraining) {
+  replicate(
+    100, 
+    {
+      simulate_response(
+        n_cosines=1200, n_outputs=1, turnover=120, 
+        eta=1e-4, pretraining=pretraining, post_training=T
+      )$c
+    }
+  )
+})
+
+colnames(result) = pretraining
+g_omit_response =
+  result %>%
+  melt() %>%
+  mutate(Var2 = factor(Var2, levels=c("TRUE", "FALSE"))) %>%
+  ggplot(aes(Var2, value)) +
+  ggforce::geom_sina(shape=16, size=.2) +
+  theme(
+    axis.text.x = element_text(angle=45, hjust=1)
+  ) +
+  xlab("Learning during\nsession one") +
+  ylab("Response integrity\n(sess. 1 vs. sess. 2)") +
+  ylim(-.4, 1) +
+  geom_hline(yintercept=0, lty=2) +
+  geom_hline(yintercept = 0, lty=2) +
+  geom_boxplot(fill=NA, outlier.shape = NA)
+g_omit_response
+```
+
+```{r, fig.height=4, fig.width=3}
+set.seed(1982375)
+
+eta = c(1e-4)
+
+result = sapply(eta, function(eta) {
+  df_weights =
+    simulate_response(
+      n_cosines=1200, n_outputs=1, turnover=120, 
+      eta=eta, pretraining=T, post_training=T
+    )$w
+  df_weights$eta = eta
+  df_weights
+}, simplify=F) %>%
+  bind_rows()
+
+g_synaptic_strength=
+  result %>%
+  gather(Condition, Strength, -eta) %>%
+  mutate(Condition=revalue(Condition, replace=c(
+    "original_weights"="Sess. one\n(early)",
+    "trained_weights"="Sess. one\n(late)",
+    "post_turnover_weights"="Sess. two\n(late)"
+  ))) %>%
+  ggplot(aes(Strength, group=Condition)) +
+  facet_grid(~eta) +
+  facet_grid(Condition~.) +
+  geom_histogram(bins=100, fill="black") +
+  theme(
+    strip.background = element_blank()
+  ) +
+  labs(x="Synaptic strength", y="Count")
+g_synaptic_strength
+```
+

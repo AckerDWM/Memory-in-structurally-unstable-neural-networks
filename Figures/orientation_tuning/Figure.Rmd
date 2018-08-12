@@ -1,0 +1,154 @@
+```{r, fig.height=1.5, fig.width=6}
+V1_cells = c(327, 863, 946) #sample(which(colSums(y_V1)>0), 3)
+
+df_receptive_field_original =
+  sapply(V1_cells, function(V1_cell) {
+    inputs = which(w_LGN_to_V1_original[,V1_cell] > 0)
+    photoreceptor_fields = w_photoreceptors_to_LGN[,inputs]
+    LGN_weights = w_LGN_to_V1_original[inputs, V1_cell]
+    for (i in seq_along(LGN_weights)) {
+      photoreceptor_fields[, i] = photoreceptor_fields[, i] * LGN_weights[i]
+    }
+    
+    photoreceptor_fields %>% 
+      rowSums() %>% 
+      matrix(100, 100) %>% 
+      melt() %>%
+      mutate(Cell=V1_cell)
+  }, simplify=F) %>%
+    bind_rows() %>%
+  mutate(Day = "0")
+
+df_receptive_field_final =
+  sapply(V1_cells, function(V1_cell) {
+    inputs = which(w_LGN_to_V1[,V1_cell] > 0)
+    photoreceptor_fields = w_photoreceptors_to_LGN[,inputs]
+    LGN_weights = w_LGN_to_V1[inputs, V1_cell]
+    for (i in seq_along(LGN_weights)) {
+      photoreceptor_fields[, i] = photoreceptor_fields[, i] * LGN_weights[i]
+    }
+    
+    photoreceptor_fields %>% 
+      rowSums() %>% 
+      matrix(100, 100) %>% 
+      melt() %>%
+      mutate(Cell=V1_cell)
+  }, simplify=F) %>%
+    bind_rows() %>%
+  mutate(Day = "118")
+
+df_receptive_field = bind_rows(df_receptive_field_original, df_receptive_field_final)
+
+g_receptive_field = 
+  ggplot(df_receptive_field, aes(Var1, Var2, fill=value)) +
+  facet_grid(Day~Cell, labeller=label_both) +
+  geom_raster() +
+  scale_fill_gradient2(low="blue", midpoint=0, mid="white", high="red") +
+  coord_equal() +
+  labs(x="X-position [px]", y="Y-position [px]", fill="Amp.") +
+  guides(fill=guide_colorbar(barwidth = .5, barheight=3)) +
+  scale_x_continuous(breaks=c(25, 75)) +
+  scale_y_continuous(breaks=c(25, 75)) +
+  theme(legend.position = "right")
+
+g_curves = 
+  df %>%
+  mutate(Day = ifelse(Day=="60", "118", Day)) %>%
+  filter(Cell %in% paste("V", V1_cells, sep="")) %>%
+  mutate(Degrees = (Theta + pi) * (360/(2*pi)) - 90) %>%
+  mutate(Cell = Cell %>% readr::parse_number() %>% as.character()) %>%
+  ggplot(aes(Degrees, Rate, group=Day, lty=Day)) +
+  facet_grid(Cell~., labeller=label_both) +
+  geom_line(stat="summary", fun.data="mean_se") +
+  ylab("Firing rate") +
+  xlab("Stim. orientation [°]") +
+  theme(legend.position="top") +
+  guides(lty=guide_legend(keywidth = .5))
+g_curves
+
+g_curves_I =
+  df_I %>%
+  mutate(Day = ifelse(Day=="60", "Day: 118", "Day: 0")) %>%
+  filter(Cell %in% paste("V", V1_cells, sep="")) %>%
+  mutate(Degrees = (Theta + pi) * (360/(2*pi)) - 90) %>%
+  mutate(Cell = Cell %>% readr::parse_number() %>% as.character()) %>%
+  ggplot(aes(Degrees, Rate, group=Day, lty=Day)) +
+  facet_grid(Cell~., labeller=label_both) +
+  geom_line(stat="summary", fun.data="mean_se") +
+  ylab("Synaptic input") +
+  xlab("Stim. orientation [°]") +
+  theme(legend.title = element_blank())
+```
+
+```{r}
+
+df_strengths =
+  bind_rows(
+    w_LGN_to_V1_original %>%
+      data.frame() %>%
+      gather(Cell, Strength) %>%
+      filter(Strength > 0) %>%
+      mutate(Day = "Original"),
+    w_LGN_to_V1 %>%
+      data.frame() %>%
+      gather(Cell, Strength) %>%
+      filter(Strength > 0) %>%
+      mutate(Day = "Final")
+  ) %>%
+  mutate(Day = factor(Day, levels=c("Original", "Final")))
+
+g_strengths = 
+  df_strengths %>%
+  ggplot(aes(Strength)) +
+  facet_grid(Day~.) +
+  geom_histogram(bins=100, color="black", fill="black") +
+  ylab("Count") +
+  xlab("Synaptic strength [au]")
+
+g_strengths
+```
+
+```{r}
+theme_set(
+  theme_classic() +
+    theme(
+      text=element_text(size=8, family="Times New Roman"),
+      legend.background=element_rect(fill=NA),
+      legend.margin = margin(0, 0, 0, 0),
+      axis.line = element_line(size=.25),
+      axis.ticks = element_blank(),
+      axis.text.y = element_text(margin = margin(r = -1)),
+      axis.text.x = element_text(margin = margin(t = -1)),
+      strip.background = element_rect(fill=NA, color=NA)
+      )
+)
+```
+
+
+```{r}
+no_legend = theme(legend.position = "none")
+
+png("../orientation_figure_4-test.png", width=6, height=3.5, units="in", res=300)
+
+ggdraw() +
+  draw_plot(g_receptive_field, x=0, y=.5, width=.5, height=.5) +
+  draw_plot(
+    g_curves_I + 
+      theme(legend.position=c(.27, .97)) +
+      guides(lty=guide_legend(keywidth=.5, keyheight=.5, nrow=2)), 
+    x=.5, y=.5, width=.25, height=.5
+    ) +
+  draw_plot(g_curves + no_legend, x=.75, y=.5, width=.25, height=.5) +
+  draw_plot(g1_preference, x=0, y=0, width=.33, height=.5) +
+  draw_plot(g2_preference, x=.33, y=0, width=.33, height=.5) +
+  draw_plot(g_strengths, x=.66, y=0, width=.33, height=.5) +
+  draw_plot_label(
+    label=LETTERS[1:6], 
+    x=c(0, .5, .75, 0, .33, .66),
+    y=c(1, 1, 1, .5, .5, .5),
+    size=10
+    )
+
+dev.off()
+```
+

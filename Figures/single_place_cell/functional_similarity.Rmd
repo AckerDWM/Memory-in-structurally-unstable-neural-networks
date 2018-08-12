@@ -1,0 +1,242 @@
+Import required libraries
+
+```{r, message=FALSE, warning=FALSE}
+library(magrittr)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(ggplot2)
+library(cowplot)
+library(reticulate)
+library(latex2exp)
+np = import("numpy")
+```
+
+Set a theme for all ggplot graphics
+
+```{r}
+theme_set(
+  theme_classic() +
+    theme(
+      text=element_text(size=8, family="Times New Roman"),
+      legend.background=element_rect(fill=NA),
+      legend.margin = margin(0, 0, 0, 0),
+      axis.line = element_line(size=.25),
+      axis.ticks = element_blank(),
+      axis.text.y = element_text(margin = margin(r = -1)),
+      axis.text.x = element_text(margin = margin(t = -1)),
+      strip.background = element_rect(fill=NA, color=NA)
+      )
+)
+```
+
+Generate a pool of synaptic weights sampled from the empirical distribution
+
+```{r}
+set.seed(9812341)
+
+P = function(s) {
+  A = 100.7
+  B = 0.02
+  sigma1 = 0.022
+  sigma2 = 0.018
+  sigma3 = 0.150
+  A*(1-exp(-s/sigma1))*(exp(-s/sigma2)+B*exp(-s/sigma3))
+}
+
+W = function(s) {
+  (s/.2)*(s/(s+0.0314))
+}
+
+s = runif(1000000, 0, .2)
+p = runif(1000000, 0, 23)
+synaptic_size_pool = s[p<=P(s)]
+synaptic_strength_pool = W(synaptic_size_pool)
+```
+
+Load the pre-computed matrix of grid cell firing rates by running track position
+
+```{r}
+load_input = function() {
+  wd = getwd()
+  setwd("/Users/danielacker/Google Drive/memory-amidst-structural-instability/Figures/grid_cells/grid_cells-2d.npy")
+  grid = np$load("grid_cells-2d.npy") %>% t()
+  setwd(wd)
+  return(grid)
+}
+
+all_grid_cells = load_input()
+```
+
+```{r}
+simulate = function(
+  n_cosines, n_outputs, turnover, eta, pretraining=T, post_training=T) {
+  
+  threshold_function = function(x) {x[x - quantile(x, .9) < 0]=0;x}
+  
+  # Initialize inputs and synaptic weights
+  orginal_input_idx = sample(1:10000, n_cosines)
+  new_input_idx = sample(which(!(1:10000) %in% orginal_input_idx), turnover)
+  input = all_grid_cells[,orginal_input_idx]
+  weights = replicate(n_outputs, sample(synaptic_strength_pool, size=n_cosines, replace=T))
+  replacement_input = all_grid_cells[,new_input_idx]
+  
+  # save original weights
+  df_weights = data.frame(original_weights = c(weights))
+  
+  # Activate the output units pre-turnover
+  response = input %*% weights
+  response %<>% apply(2, threshold_function)
+  
+  # Pre-training
+  if (pretraining) {
+    dw = np$dot(t(input), response)
+    weights = weights + eta*dw
+    weights %<>% apply(2, function(x) 148.7*x/sum(x))
+  }
+  
+  # Save trained weights
+  df_weights$trained_weights = c(weights)
+  
+  # Save weights and inputs
+  inputs_pre_turnover = input
+  weights_pre_turnover = weights
+  
+  # Synpase turnover
+  input[,1:turnover] = replacement_input
+  weights[1:turnover,] = sample(synaptic_strength_pool, size=turnover*n_outputs, replace=T)
+
+  # Activate the output units post-turnover
+  response = input %*% weights
+  response %<>% apply(2, threshold_function)
+  
+  # Post-training
+  if (post_training) {
+    dw = np$dot(t(input), response)
+    weights = weights + eta*dw
+    weights %<>% apply(2, function(x) 148.7*x/sum(x))
+  }
+  
+  # Save trained/post-turnover weights
+  df_weights$post_turnover_weights = c(weights)
+  
+  # Sum synaptic potentials across replaced inputs
+  PSP_pre_turnover = inputs_pre_turnover[,1:turnover] %*% weights_pre_turnover[1:turnover,]
+  PSP_post_turnover = input[,1:turnover] %*% weights[1:turnover,]
+  
+  # Get correlation between PSPs pre and post-turnover
+  correlation = cor(c(PSP_pre_turnover), c(PSP_post_turnover))
+
+  return(list(w=df_weights, c=correlation))
+}
+```
+
+```{r, fig.height=2, fig.width=4}
+set.seed(9451243)
+
+eta = c(1, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7)
+
+result = sapply(eta, function(eta) {
+  replicate(
+    100, 
+    {
+      simulate(
+        n_cosines=1200, n_outputs=1, turnover=120, 
+        eta=eta, pretraining=T, post_training=T
+      )$c
+    }
+  )
+})
+
+colnames(result) = eta
+g_strength =
+  result %>%
+  melt() %>%
+  ggplot(aes(factor(Var2), value)) +
+  ggforce::geom_sina(shape=16, size=.2) +
+  theme(
+    axis.text.x = element_text(angle=45, hjust=1)
+  ) +
+  xlab("Learning rate") +
+  ylab("Functional similarity\n(new vs. lost synapses)") +
+  ylim(-1, 1) +
+  geom_hline(yintercept = 0, lty=2) +
+  geom_boxplot(fill=NA, outlier.shape = NA)
+g_strength
+```
+
+```{r, fig.height=2, fig.width=4}
+set.seed(9451243)
+
+turnover = 1200*seq(.1, 1, .1)
+
+result = sapply(turnover, function(turnover) {
+  replicate(
+    100, 
+    {
+      simulate(
+        n_cosines=1200, n_outputs=1, turnover=turnover, 
+        eta=1e-4, pretraining=T, post_training=T
+      )$c
+    }
+  )
+})
+
+colnames(result) = turnover
+g_synapse =
+  result %>%
+  melt() %>%
+  ggplot(aes(factor(100*Var2/1200), value)) +
+  ggforce::geom_sina(shape=16, size=.2) +
+  xlab("% of grid-cell-to-place-cell synapses replaced") +
+  ylab("Functional similarity\n(new vs. lost synapses)") +
+  ylim(-1, 1) +
+  geom_hline(yintercept = 0, lty=2) +
+  geom_boxplot(fill=NA, outlier.shape = NA)
+g_synapse
+```
+
+```{r, fig.height=2, fig.width=2}
+set.seed(9532122)
+
+pretraining = c(T, F)
+
+result = sapply(pretraining, function(pretraining) {
+  replicate(
+    100, 
+    {
+      simulate(
+        n_cosines=1200, n_outputs=1, turnover=120, 
+        eta=1e-4, pretraining=pretraining, post_training=T
+      )$c
+    }
+  )
+})
+
+colnames(result) = pretraining
+g_omit_synapses =
+  result %>%
+  melt() %>%
+  mutate(Var2 = factor(Var2, levels=c("TRUE", "FALSE"))) %>%
+  ggplot(aes(Var2, value)) +
+  ggforce::geom_sina(shape=16, size=.2) +
+  theme(
+    axis.text.x = element_text(angle=45, hjust=1)
+  ) +
+  xlab("Learning during\nsession one") +
+  ylab("Functional similarity\n(new vs. lost synapses)") +
+  ylim(-1, 1) +
+  geom_hline(yintercept = 0, lty=2) +
+  geom_boxplot(fill=NA, outlier.shape = NA)
+g_omit_synapses
+```
+
+```{r}
+result %>%
+  melt() %>%
+  mutate(Var2 = factor(Var2, levels=c("TRUE", "FALSE"))) %>%
+  filter(Var2 == F) %$%
+  wilcox.test(value)
+```
+

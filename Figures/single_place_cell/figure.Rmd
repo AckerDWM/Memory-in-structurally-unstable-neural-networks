@@ -1,0 +1,67 @@
+```{r, fig.height=4.5, fig.width=6.18}
+library(cowplot)
+
+theme_set(theme_classic()+theme(text=element_text(size=8)))
+
+no_leg = theme(legend.position = "none")
+
+png("model_1_results.png", width=6.18, height=6, units="in", res=300)
+
+ggdraw() +
+  draw_plot(g_response, x=0, y=2/3, width=.5, height=1/3) +
+  draw_plot(g_synapse + no_leg, x=.5, y=2/3, width=.5, height=1/3) +
+  draw_plot(g_strength + no_leg, x=0, y=1/3, width=.5, height=1/3) +
+  draw_plot(g_synaptic_strength, x=.5, y=1/3, width=.5, height=1/3) +
+  draw_plot(g_omit_response, x=.5, y=0, width=.25, height=1/3) +
+  draw_plot(g_omit_synapses, x=.75, y=0, width=.25, height=1/3) +
+  draw_plot_label(
+    label=LETTERS[1:5], 
+    x=c(0, .5, 0, .5, .75), 
+    y=c(1, 1, 2/3, 2/3, 1/3), 
+    size=10
+    )
+
+dev.off()
+```
+
+```{r}
+png("Model1_figure2.png", width=6.18, height=2, units="in", res=300)
+
+ggdraw() +
+  draw_plot(g_response, x=0, y=0, width=.5, height=1) +
+  draw_plot(g_synapse, x=.5, y=0, width=.5, height=1) +
+  draw_plot_label(label=c("A", "B"), x=c(0, .5), y=c(1, 1), size=10)
+
+dev.off()
+```
+
+```{r}
+png("Model1_figure4.png", width=6.18, height=2, units="in", res=300)
+
+ggdraw() +
+  draw_plot(g_strength, x=0, y=0, width=.33, height=1) +
+  draw_plot(g_delta_vs_original_strength, x=.33, y=0, width=.33, height=1) +
+  draw_plot(g_synaptic_strength, x=.66, y=0, width=.33, height=1) +
+  draw_plot_label(label=c("A", "B", "C"), x=c(0, .33, .66), y=c(1, 1, 1), size=10)
+
+dev.off()
+```
+
+```{r}
+png("Model1_figure3.png", width=3.09, height=2, units="in", res=300)
+
+ggdraw() +
+  draw_plot(g_omit_response, x=0, y=0, width=.5, height=1) +
+  draw_plot(g_omit_synapses, x=.5, y=0, width=.5, height=1) +
+  draw_plot_label(label=c("A", "B"), x=c(0, .5), y=c(1, 1), size=10)
+
+dev.off()
+```
+
+```{r}
+png("Model1_representative-test.png", width=6.18, height=2, units="in", res=300)
+
+g_rep
+
+dev.off()
+```

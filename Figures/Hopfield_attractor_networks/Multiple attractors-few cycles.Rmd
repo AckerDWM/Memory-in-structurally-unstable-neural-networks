@@ -1,0 +1,151 @@
+```{r}
+set.seed(98716324) # set.seed(412344)
+
+eta = 1
+tau_u = 1
+gamma = 1
+
+tau_w_vec = c(25, 30, 35)
+n_reactivations_vec = c(5)
+n_replicates_per_param_combination = 100
+
+df = sapply(1:n_replicates_per_param_combination, function(replicate_n) {
+  sapply(tau_w_vec, function(tau_w) {
+    
+    n_units = 400
+    p_connection = .5
+    
+    net = create_network(n_units=n_units, p_connection=p_connection)
+    net$weights = matrix(0, n_units, n_units)
+    
+    n_attractors = 3
+    I = 
+      lapply(1:n_attractors, function(n) {
+        rbinom(n_units, 1, .5) %>% {.[.==0]=-1;.} %>% matrix(1, n_units)
+      })
+    
+    net_trained = train_n(net, I=I)
+    
+    turnover_rate = .095
+    
+    n_reps = n_reactivations_vec # reactivations / day
+    df = 
+      sapply(n_reps, function(n_reps_i) {
+        net = net_trained
+        cors = list()
+        for (i in 1:100) {
+          for (j in 1:n_reps_i) {
+            net_cors = reenter_multimem(net, I=I, tau_w=tau_w)
+            net = net_cors$net
+          }
+          net = turnover(net, turnover_rate=turnover_rate)
+          cors[[i]] = net_cors$cors
+        }
+        
+        df = do.call(rbind, cors) %>%
+          as.data.frame() %>%
+          {names(.)=LETTERS[1:length(I)];.} %>%
+          mutate(n_reps = n_reps_i) %>%
+          mutate(Time = 1:100)
+        
+        df
+        
+      }, simplify=F) %>%
+      bind_rows() %>%
+      mutate(tau_w = tau_w)
+    df
+  }, simplify = F) %>%
+    bind_rows() %>%
+    mutate(replicate_n = replicate_n)
+}, simplify=F) %>%
+  bind_rows()
+
+# write.csv(df, "../Simulation_data/multiple_attractors_by_cycles_and_tauw-100.25.csv", row.names=F)
+
+df %>%
+  filter(Time == 100) %>%
+  rowwise() %>%
+  mutate(Min = min(c(A, B, C))) %$%
+  mean(Min)
+```
+
+```{r, fig.height=1, fig.width=1}
+theme_set(
+  theme_classic() +
+    theme(
+      text=element_text(size=8, family="Times New Roman"),
+      legend.background=element_rect(fill=NA),
+      legend.margin = margin(0, 0, 0, 0),
+      axis.line = element_line(size=.25),
+      axis.ticks = element_blank(),
+      axis.text.y = element_text(margin = margin(r = -1)),
+      axis.text.x = element_text(margin = margin(t = -1)),
+      strip.background = element_rect(fill=NA, color=NA)
+      )
+)
+
+df %>%
+  tidyr::gather(Target, Integrity, -n_reps, -Time, -tau_w, -replicate_n) %>%
+  mutate(`Reactivations/day` = factor(n_reps)) %>%
+  filter(Time %in% c(1, 100)) %>%
+  group_by(Time, `Reactivations/day`, tau_w, replicate_n) %>%
+  summarise(Integrity = min(Integrity)) %>%
+  group_by(replicate_n, tau_w, `Reactivations/day`) %>%
+  mutate(Started_embedded = Integrity[Time==1] == 1) %>%
+  filter(Started_embedded) %>%
+  group_by(`Reactivations/day`, tau_w, replicate_n, Time) %>%
+  summarise(Integrity = min(Integrity)) %>%
+  mutate(Preserved = Integrity > .9) %>%
+  group_by(`Reactivations/day`, tau_w, Time) %>%
+  summarise(Prob_preserved = sum(Preserved == T)/length(Preserved)) %>%
+  filter(Time == 100) %>%
+  ggplot(aes(factor(`Reactivations/day`), factor(tau_w), fill=Prob_preserved)) +
+  geom_tile(color="white", size=1) +
+  geom_text(aes(label=round(Prob_preserved, 2)), size=2) +
+  scale_fill_distiller(palette="PuRd", direction=1, breaks=seq(0, 1, .2), limits=c(0, 1)) +
+  labs(x="Reactivations/day", y=TeX("$\\tau_w$"), fill=TeX("P($\\bar{I}_{min} > .9$)")) +
+  guides(fill=guide_colorbar(barwidth=.5))
+```
+
+```{r}
+df_summary = inner_join(
+  df %>%
+    tidyr::gather(Target, Integrity, -n_reps, -Time, -tau_w, -replicate_n) %>%
+    mutate(`Reactivations/day` = factor(n_reps)) %>%
+    filter(Time %in% c(1, 100)) %>%
+    group_by(Time, `Reactivations/day`, tau_w, replicate_n) %>%
+    summarise(Integrity = min(Integrity)) %>%
+    group_by(replicate_n, tau_w, `Reactivations/day`) %>%
+    mutate(Started_embedded = Integrity[Time==1] == 1) %>%
+    group_by(`Reactivations/day`, tau_w, Time) %>%
+    summarise(Started_embedded = sum(Started_embedded)/length(Started_embedded)) %>%
+    filter(Time == 100),
+  df %>%
+    tidyr::gather(Target, Integrity, -n_reps, -Time, -tau_w, -replicate_n) %>%
+    mutate(`Reactivations/day` = factor(n_reps)) %>%
+    filter(Time %in% c(1, 100)) %>%
+    group_by(Time, `Reactivations/day`, tau_w, replicate_n) %>%
+    summarise(Integrity = min(Integrity)) %>%
+    group_by(replicate_n, tau_w, `Reactivations/day`) %>%
+    mutate(Started_embedded = Integrity[Time==1] == 1) %>%
+    filter(Started_embedded) %>%
+    group_by(`Reactivations/day`, tau_w, replicate_n, Time) %>%
+    summarise(Integrity = min(Integrity)) %>%
+    mutate(Preserved = Integrity > .9) %>%
+    group_by(`Reactivations/day`, tau_w, Time) %>%
+    summarise(Prob_preserved = sum(Preserved == T)/length(Preserved)) %>%
+    filter(Time == 100)
+)
+
+df_summary
+
+.76*41
+.70*40
+.73*52
+
+
+30/40
+36/52
+```
+
+

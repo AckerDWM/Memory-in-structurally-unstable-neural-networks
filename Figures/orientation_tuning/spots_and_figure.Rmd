@@ -1,0 +1,142 @@
+```{r}
+spot_centers = expand.grid(x=c(1:100), y=c(1:100)) %>% as.matrix()
+
+spots_inputs_off =
+  sapply(1:nrow(spot_centers), function(i) {
+    spot_center = spot_centers[i,]
+    spots_input = 
+      matrix(1, 100, 100) %>%
+      {
+        .[spot_center[1], spot_center[2]] = 0
+        .
+      }
+    spots_input
+  })
+
+spots_inputs_on =
+  sapply(1:nrow(spot_centers), function(i) {
+    spot_center = spot_centers[i,]
+    spots_input = 
+      matrix(0, 100, 100) %>%
+      {
+        .[spot_center[1], spot_center[2]] = 1
+        .
+      }
+    spots_input
+  })
+```
+
+```{r}
+y_LGN_spots_on = response_LGN(t(spots_inputs_on), w_photoreceptors_to_LGN)
+y_LGN_spots_off = response_LGN(t(spots_inputs_off), w_photoreceptors_to_LGN)
+
+y_V1_spots_on = np$dot(y_LGN_spots_on, w_LGN_to_V1)
+y_V1_spots_off = np$dot(y_LGN_spots_off, w_LGN_to_V1)
+
+y_V1_spots_on_original = np$dot(y_LGN_spots_on, w_LGN_to_V1_original)
+y_V1_spots_off_original = np$dot(y_LGN_spots_off, w_LGN_to_V1_original)
+```
+
+```{r}
+cells = c(863, 946, 327) # sample(which(colSums(y_V1)>0), 3)
+
+df_spot_responses = sapply(cells, function(cell) {
+  df_spot_responses = 
+    data.frame(
+      x=spot_centers[,1], 
+      y=spot_centers[,2],
+      Day=118,
+      Cell=cell
+    )
+  
+  df_spot_responses_original = 
+    data.frame(
+      x=spot_centers[,1], 
+      y=spot_centers[,2],
+      Day=0,
+      Cell=cell
+    )
+  
+  df_spot_responses["On"] = y_V1_spots_on[,cell]
+  df_spot_responses["Off"] = y_V1_spots_off[,cell]
+  df_spot_responses_original["On"] = y_V1_spots_on_original[,cell]
+  df_spot_responses_original["Off"] = y_V1_spots_off_original[,cell]
+  
+  df_spot_responses = bind_rows(df_spot_responses_original, df_spot_responses)
+  df_spot_responses %<>% gather(Polarity, Excitation, -x, -y, -Day, -Cell)
+}, simplify=F) %>%
+  bind_rows() %>%
+  mutate(Cell = paste("Cell", Cell, sep=": ")) %>%
+  mutate(Day = paste("Day", Day, sep=": "))
+```
+
+```{r}
+g_spot_centers = 
+  ggplot(df_spot_responses, aes(x, y, fill=Excitation)) +
+  facet_grid_paginate(Day~Cell+Polarity) +
+  geom_raster() +
+  scale_fill_distiller(palette="Greys") +
+  coord_equal() +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.line = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "bottom",
+    legend.just = "right",
+    strip.text.x = element_blank(),
+    panel.spacing = unit(0, "lines")
+  ) +
+  guides(fill=guide_colorbar(barheight=.5)) +
+  geom_text(
+    data = 
+      df_spot_responses %>%
+      group_by(Day, Cell, Polarity) %>%
+      summarise(Excitation=Excitation[1]),
+    aes(x=0, y=100, label=Cell), color="white", 
+    vjust=1.4, hjust=-.1, size=1.5
+    ) +
+  geom_text(
+    data = 
+      df_spot_responses %>%
+      group_by(Day, Cell, Polarity) %>%
+      summarise(Excitation=Excitation[1]),
+    aes(x=0, y=0, label=Polarity), color="white", 
+    vjust=-.8, hjust=-.3, size=1.5
+    )
+
+g_spot_centers
+```
+
+
+```{r}
+no_legend = theme(legend.position = "none")
+
+png("../orientation_figure_4-spot_centers.png", width=6, height=3.5, units="in", res=300)
+
+ggdraw() +
+  draw_plot(g_spot_centers, x=0, y=.5, width=.5, height=.5) +
+  draw_plot(
+    g_curves_I + 
+      theme(legend.position=c(.35, .97)) +
+      guides(lty=guide_legend(keywidth=.5, keyheight=.5, nrow=2)), 
+    x=.5, y=.5, width=.25, height=.5
+    ) +
+  draw_plot(g_curves + no_legend, x=.75, y=.5, width=.25, height=.5) +
+  draw_plot(g1_preference, x=0, y=0, width=.33, height=.5) +
+  draw_plot(g2_preference, x=.33, y=0, width=.33, height=.5) +
+  draw_plot(g_strengths, x=.66, y=0, width=.33, height=.5) +
+  draw_plot_label(
+    label=LETTERS[1:6], 
+    x=c(0, .5, .75, 0, .33, .66),
+    y=c(1, 1, 1, .5, .5, .5),
+    size=10
+    )
+
+dev.off()
+```
+
+
+
+

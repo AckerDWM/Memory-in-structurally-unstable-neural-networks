@@ -1,0 +1,52 @@
+```{r}
+df_a = read.csv("../Simulation_data/multiple_attractors_by_cycles_and_tauw-100.25.csv")
+df_b = read.csv("../Simulation_data/multiple_attractors_by_cycles_and_tauw.csv")
+df = bind_rows(df_a, df_b)
+df
+```
+
+```{r, fig.height=1, fig.width=1.4}
+theme_set(
+  theme_classic() +
+    theme(
+      text=element_text(size=8, family="Times New Roman"),
+      legend.background=element_rect(fill=NA),
+      legend.margin = margin(0, 0, 0, 0),
+      axis.line = element_line(size=.25),
+      axis.ticks = element_blank(),
+      axis.text.y = element_text(margin = margin(r = -1)),
+      axis.text.x = element_text(margin = margin(t = -1)),
+      strip.background = element_rect(fill=NA, color=NA)
+      )
+)
+```
+
+```{r, fig.height=1, fig.width=1.4}
+g = 
+  df %>%
+  tidyr::gather(Target, Integrity, -n_reps, -Time, -tau_w, -replicate_n) %>%
+  mutate(`Reactivations/day` = factor(n_reps)) %>%
+  filter(Time %in% c(1, 100)) %>%
+  group_by(Time, `Reactivations/day`, tau_w, replicate_n) %>%
+  summarise(Integrity = min(Integrity)) %>%
+  group_by(replicate_n, tau_w, `Reactivations/day`) %>%
+  mutate(Started_embedded = Integrity[Time==1] == 1) %>%
+  filter(Started_embedded) %>%
+  group_by(`Reactivations/day`, tau_w, replicate_n, Time) %>%
+  summarise(Integrity = min(Integrity)) %>%
+  mutate(Preserved = Integrity > .9) %>%
+  group_by(`Reactivations/day`, tau_w, Time) %>%
+  summarise(Prob_preserved = sum(Preserved == T)/length(Preserved)) %>%
+  filter(Time == 100) %>%
+  ggplot(aes(factor(`Reactivations/day`), factor(tau_w), fill=Prob_preserved)) +
+  geom_tile(color="white", size=1) +
+  geom_text(aes(label=round(Prob_preserved, 2)), size=2) +
+  scale_fill_distiller(palette="PuRd", direction=1, breaks=seq(0, 1, .2), limits=c(0, 1)) +
+  labs(x="Reactivations/day", y=TeX("$\\tau_w$"), fill=TeX("P($\\bar{I}_{min} > .9$)")) +
+  guides(fill=guide_colorbar(barwidth=.5))
+
+png("Multiple-attractors-test.png", width=3.09, height=2, units="in", res=300)
+g
+dev.off()
+```
+

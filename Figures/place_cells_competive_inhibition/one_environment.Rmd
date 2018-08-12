@@ -1,0 +1,122 @@
+```{r}
+source("requirements.R")
+source("methods.R")
+source("sim.R")
+```
+
+Simulations to evaluate drift in one environment at a single learning rate.
+
+```{r}
+set.seed(83721)
+
+eta = c(0, 1e-4) %>% replicate(10, .) %>% c()
+df_one_environment = 
+  sapply(eta, function(eta) {
+    sim(learning_rate=eta, dropout_fun="E%-max") %>%
+      get_mean_place_field_properties() %>%
+      mutate(Eta = eta)
+  }, simplify=F) %>%
+  bind_rows()
+
+# save results to avoid running again
+write.csv(df_one_environment, "../Simulation_data/place_cells_in_one_env.csv", row.names=F)
+```
+
+Plot mean drift by simulation by day by learning rate.
+
+```{r, fig.height=1, fig.width=2}
+g_drift =
+  df_one_environment %>%
+  mutate(Condition = ifelse(Eta==0, "No learning", "Learning")) %>%
+  mutate(Condition = factor(Condition, levels=c("No learning", "Learning"))) %>%
+  ggplot(aes(Day, Median_drift, color=factor(Condition), group=factor(Condition))) +
+  geom_line(stat="summary", fun.data="mean_se") +
+  geom_errorbar(stat="summary", fun.data="mean_se") +
+  geom_point(size=.2, alpha=.1) +
+  scale_color_aaas() +
+  ylab("Place field drift [cm]") +
+  xlab("Day") +
+  theme(
+    legend.position = c(.6, .4),
+    legend.margin = margin(0,0,0,0),
+    legend.title = element_blank()
+    ) +
+  guides(color=guide_legend(keywidth = .5, keyheight = .5, nrow=2)) +
+  annotate("point", x=17.5, y=2.5, shape=13, size=3)
+g_drift
+```
+
+Run representative simulations with and without Hebbian learning.
+
+```{r}
+set.seed(431431)
+no_learning = sim(learning_rate=0, dropout_fun="E%-max")
+learning = sim(learning_rate=1e-4, dropout_fun="E%-max")
+```
+
+Generate representative raster plots of place fields with and without Hebbian learning.
+
+```{r}
+centroids_day0_no_learning = get_centroids(no_learning[[1]]$firing_rates)
+idx_no_learning = order(centroids_day0_no_learning, na.last=NA)
+df_rep_no_learning = 
+  sapply(1:length(no_learning), function(i) {
+    no_learning[[i]]$firing_rates[, idx_no_learning] %>%
+      melt() %>%
+      mutate(Day=i-1)
+  }, simplify=F) %>%
+  bind_rows() %>%
+  mutate(Condition="No learning")
+
+
+centroids_day0_learning = get_centroids(learning[[1]]$firing_rates)
+idx_learning = order(centroids_day0_learning, na.last=NA)
+
+df_rep_learning = 
+  sapply(1:length(no_learning), function(i) {
+    learning[[i]]$firing_rates[, idx_learning] %>%
+      melt() %>%
+      mutate(Day=i-1)
+  }, simplify=F) %>%
+  bind_rows() %>%
+  mutate(Condition="Learning")
+
+df_rep = bind_rows(df_rep_no_learning, df_rep_learning)
+
+g_rep =
+  df_rep %>%
+  filter(value != 0) %>%
+  filter(Day %in% c(0, 5, 10, 15, 20, 25, 30, 60)) %>%
+  mutate(Day = paste("Day", Day)) %>%
+  mutate(Day = factor(Day, levels=c(
+    paste("Day", c(0, 5, 10, 15, 20, 25, 30, 60))
+  ))) %>%
+  mutate(Condition = factor(Condition, levels=c("No learning", "Learning"))) %>%
+  ggplot(aes(Var1, Var2, fill=1)) +
+  facet_grid(Condition~Day, scales="free_y") +
+  geom_raster(interpolate=T) +
+  scale_fill_gradientn(colors=c("black")) +
+  scale_x_continuous(breaks=c(25, 75)) +
+  theme(
+    strip.background = element_blank(),
+    legend.position = "none"
+    ) +
+  ylab("Place cell index") +
+  xlab("Position [cm]")
+g_rep
+```
+
+Generate a figure with the results.
+
+```{r}
+png("Model2_learning_vs_no_learning-test.png", width=6.18, height=2, units="in", res=300)
+
+plot_grid(
+  g_drift, g_rep, 
+  nrow=1, rel_widths = c(1, 2),
+  labels = c("A", "B"), label_size = 10
+)
+
+dev.off()
+```
+

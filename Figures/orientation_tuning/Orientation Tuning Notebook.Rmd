@@ -1,0 +1,501 @@
+---
+title: "Orientation Tuning Notebook"
+output: html_notebook
+---
+
+# Summary
+
+An orientation tuning model building on a `Biol Cybern (2012) 106:177–189`. This is a model of V1 simple cells receiving input from on and off center LGN cells.
+
+# Random seed for the simulation
+
+```{r}
+set.seed(7983412)
+```
+
+
+# LGN cells
+
+LGN on and off center-surround cells are modeled as a difference of 2D Gaussians where the standard deviation of the second (inner) Gaussian is half that of the first.
+
+```{r}
+DoG_center_on = function(x, y, sigma) {
+  Gauss_1 = 1/(2*pi*sigma^2)*exp(-(x^2+y^2)/(2*sigma^2))
+  Gauss_2 = 1/(2*pi*(.5*sigma)^2)*exp(-(x^2+y^2)/(2*(.5*sigma)^2))
+  -1*(Gauss_1 - Gauss_2)
+}
+
+DoG_center_off = function(x, y, sigma) {
+  -1*DoG_center_on(x, y, sigma)
+}
+
+LGN_cell_response = function(x, y, polarity, sigma) {
+  response = NULL
+  if (polarity == "on") response = DoG_center_on(x, y, sigma)
+  if (polarity == "off") response = DoG_center_off(x, y, sigma)
+  response
+}
+```
+
+Example on and off center filters are shown below.
+
+```{r}
+x = 1:100
+y = x
+
+center_x = 30
+center_y = 80
+on_center_example = outer(x-center_x, y-center_y, LGN_cell_response, polarity="on", sigma=5) # adjusted sig
+off_center_example = outer(x-center_x, y-center_y, LGN_cell_response, polarity="off", sigma=5) # adjusted sig
+
+par(mfrow=c(1,2))
+image(on_center_example, main="Center on", col=jet.col())
+image(off_center_example, main="Center off",  col=jet.col())
+```
+
+# The LGN population
+
+In this model, the LGN will contain ~50% on and ~50% off center cells.
+
+```{r}
+n_LGN_cells = 20000
+
+LGN_cell_parameters = 
+  data.frame(
+    center_x = sample(1:100, n_LGN_cells, replace=T),
+    center_y = sample(1:100, n_LGN_cells, replace=T),
+    polarity = sample(c("on", "off"), n_LGN_cells, replace=T),
+    cell_id = seq_len(n_LGN_cells)
+  )
+
+w_photoreceptors_to_LGN = sapply(seq_len(n_LGN_cells), function(i) {
+  x = 1:100
+  y = x
+  center_x = LGN_cell_parameters$center_x[i]
+  center_y = LGN_cell_parameters$center_y[i]
+  polarity = LGN_cell_parameters$polarity[i]
+  outer(x-center_x, y-center_y, LGN_cell_response, polarity=polarity, sigma=3) # adjusted sig
+})
+```
+
+# LGN responses
+
+LGN cells will be rectified units.
+
+```{r}
+response_LGN = function(images, w_photoreceptors_to_LGN) {
+  y_LGN = np$dot(images, w_photoreceptors_to_LGN)
+  y_LGN[y_LGN < 0] = 0
+  y_LGN
+}
+```
+
+# V1 cells
+
+V1 cells will linear units summing inputs from LGN cells. First I will specify a pool of possible synaptic weights. This approximately a truncated log-normal distribution, as described for hippocampal granule cells. A more realistic set of weights for V1 may be used in a later iteration of the model.
+
+```{r}
+P = function(s) {
+  A = 100.7
+  B = 0.02
+  sigma1 = 0.022
+  sigma2 = 0.018
+  sigma3 = 0.150
+  A*(1-exp(-s/sigma1))*(exp(-s/sigma2)+B*exp(-s/sigma3))
+}
+W = function(s) {
+  (s/.2)*(s/(s+0.0314))
+}
+
+s = runif(1000000, 0, .2)
+p = runif(1000000, 0, 23)
+synaptic_size_pool = s[p<=P(s)]
+synaptic_strength_pool = W(synaptic_size_pool)
+```
+
+Now I will connect the V1 and LGN cells. V1 cells will receive input from spatially defined bars of LGN on center cells surrounded by off center cells.
+
+```{r}
+n_V1_cells = 1000
+
+V1_cell_parameters = 
+  data.frame(
+    center_x = sample(31:70, n_V1_cells, replace=T),
+    center_y = sample(31:70, n_V1_cells, replace=T),
+    prefered_orientation = runif(n_V1_cells, -pi/2, pi/2)
+  )
+
+w_LGN_to_V1 = 
+  sapply(seq_len(n_V1_cells), function(i) {
+    center_x = V1_cell_parameters$center_x[i]
+    center_y = V1_cell_parameters$center_y[i]
+    prefered_orientation = V1_cell_parameters$prefered_orientation[i]
+    
+    # center-on inputs
+    bar_coordinate_matrix = cbind(seq(-20, 20, length=100), rep(-15, 100)) %>%
+      spdep::Rotation(prefered_orientation)
+    bar_coordinate_matrix[,1] %<>% {. + center_x}
+    bar_coordinate_matrix[,2] %<>% {. + center_y}
+    LGN_on_cell_parameters =
+      LGN_cell_parameters %>%
+      filter(polarity == "on")
+    distances_x = 
+      outer(
+        X=bar_coordinate_matrix[,1], 
+        Y=LGN_on_cell_parameters$center_x, 
+        FUN=function(a, b) {(a-b)^2}
+        )
+    distances_y = 
+      outer(
+        X=bar_coordinate_matrix[,2], 
+        Y=LGN_on_cell_parameters$center_y, 
+        FUN=function(a, b) {(a-b)^2}
+        )
+    distances = distances_x + distances_y
+    
+    minimal_distance_idx = 
+      distances %>%
+      rank() %>% 
+      matrix(nrow(distances), ncol(distances)) %>% 
+      melt() %>%
+      rename(Bar_position=Var1, LGN_cell=Var2, Rank=value) %>%
+      arrange(Rank) %>%
+      mutate(LGN_duplicate = duplicated(LGN_cell)) %>%
+      filter(LGN_duplicate == F) %$%
+      LGN_cell[1:33]
+    
+    LGN_input_ids = LGN_on_cell_parameters$cell_id[minimal_distance_idx]
+    w = rep(0, n_LGN_cells) %>% {.[LGN_input_ids]=sample(synaptic_strength_pool, length(LGN_input_ids));.}
+    
+    # center-off inputs
+    bar_coordinate_matrix = 
+      cbind(
+        seq(-30, 30, length=100), 
+        rep(0, 100)
+        ) %>%
+      spdep::Rotation(prefered_orientation)
+    bar_coordinate_matrix[,1] %<>% {. + center_x}
+    bar_coordinate_matrix[,2] %<>% {. + center_y}
+    LGN_off_cell_parameters =
+      LGN_cell_parameters %>%
+      filter(polarity == "off")
+    distances_x = 
+      outer(
+        X=bar_coordinate_matrix[,1], 
+        Y=LGN_off_cell_parameters$center_x, 
+        FUN=function(a, b) {(a-b)^2}
+        )
+    distances_y = 
+      outer(
+        X=bar_coordinate_matrix[,2], 
+        Y=LGN_off_cell_parameters$center_y, 
+        FUN=function(a, b) {(a-b)^2}
+        )
+    distances = distances_x + distances_y
+    
+    minimal_distance_idx = 
+      distances %>%
+      rank() %>% 
+      matrix(nrow(distances), ncol(distances)) %>% 
+      melt() %>%
+      rename(Bar_position=Var1, LGN_cell=Var2, Rank=value) %>%
+      arrange(Rank) %>%
+      mutate(LGN_duplicate = duplicated(LGN_cell)) %>%
+      filter(LGN_duplicate == F) %$%
+      LGN_cell[1:64]
+    
+    LGN_input_ids = LGN_off_cell_parameters$cell_id[minimal_distance_idx]
+    w[LGN_input_ids] = sample(synaptic_strength_pool, length(LGN_input_ids))
+    
+    # center-on inputs
+    bar_coordinate_matrix = 
+      cbind(
+        seq(-20, 20, length=100), 
+        rep(15, 100)
+        ) %>%
+      spdep::Rotation(prefered_orientation)
+    bar_coordinate_matrix[,1] %<>% {. + center_x}
+    bar_coordinate_matrix[,2] %<>% {. + center_y}
+    LGN_on_cell_parameters =
+      LGN_cell_parameters %>%
+      filter(polarity == "on")
+    distances_x = 
+      outer(
+        X=bar_coordinate_matrix[,1], 
+        Y=LGN_on_cell_parameters$center_x, 
+        FUN=function(a, b) {(a-b)^2}
+        )
+    distances_y = 
+      outer(
+        X=bar_coordinate_matrix[,2], 
+        Y=LGN_on_cell_parameters$center_y, 
+        FUN=function(a, b) {(a-b)^2}
+        )
+    distances = distances_x + distances_y
+    
+    minimal_distance_idx = 
+      distances %>%
+      rank() %>% 
+      matrix(nrow(distances), ncol(distances)) %>% 
+      melt() %>%
+      rename(Bar_position=Var1, LGN_cell=Var2, Rank=value) %>%
+      arrange(Rank) %>%
+      mutate(LGN_duplicate = duplicated(LGN_cell)) %>%
+      filter(LGN_duplicate == F) %$%
+      LGN_cell[1:33]
+    
+    LGN_input_ids = LGN_on_cell_parameters$cell_id[minimal_distance_idx]
+    w[LGN_input_ids] = sample(synaptic_strength_pool, length(LGN_input_ids))
+    
+    w
+  })
+```
+
+
+# Stimuli
+
+The stimuli will be 2D gratings at various orientations.
+
+```{r}
+x = seq(-1, 1, length=100)
+y = seq(-1, 1, length=100)
+I = function(x, y, theta, phi) {
+  1 + sin(10*(x*cos(theta) - y*sin(theta)) - phi)
+}
+
+all_theta = c()
+stimuli = sapply(seq(-pi/2, pi/2, .1), function(theta) {
+  phi = seq(0, 2*pi-.1, .1)
+  all_theta <<- c(all_theta, rep(theta, length(phi)))
+  sapply(1:length(phi), function(i) {
+    stimulus = outer(X=x, Y=y, FUN=I, theta=theta, phi=phi[i])
+    c(stimulus)
+  }) %>%
+    t()
+}, simplify=F) %>%
+  do.call(rbind, .)
+```
+
+Examples of stimulus gratings are shown below.
+
+```{r}
+par(mfrow=c(1,3))
+stimuli[1,] %>% matrix(100, 100) %>% image(col=jet.col(), main=round(all_theta[50]))
+stimuli[100,] %>% matrix(100, 100) %>% image(col=jet.col(), main=round(all_theta[100]))
+stimuli[200,] %>% matrix(100, 100) %>% image(col=jet.col(), main=round(all_theta[200]))
+```
+
+# Synapse turnover
+
+```{r}
+# turnover = function(w_LGN_to_V1, frac_turnover=.1) {
+#   apply(w_LGN_to_V1, 2, function(w_LGN_to_V1_i) {
+#     realized_synapses = which(w_LGN_to_V1_i > 0)
+#     unrealized_synapses = which(w_LGN_to_V1_i == 0)
+#     n_turnover = realized_synapses %>% length() %>% round() %>% {frac_turnover*.}
+#     w_LGN_to_V1_i[sample(realized_synapses, n_turnover)] = 0
+#     w_LGN_to_V1_i[sample(unrealized_synapses, n_turnover)] = sample(synaptic_strength_pool, n_turnover)
+#     w_LGN_to_V1_i
+#   })
+# }
+
+Gauss = function(x, y, sigma) 1/(2*pi*sigma^2)*exp(-(x^2+y^2)/(2*sigma^2))
+
+turnover = function(w_LGN_to_V1, frac_turnover=.1) {
+  sapply(1:nrow(V1_cell_parameters), function(i) {
+    V1_center_x = V1_cell_parameters$center_x[i]
+    V1_center_y = V1_cell_parameters$center_y[i]
+    
+    w_LGN_to_V1_i = w_LGN_to_V1[,i]
+    realized_synapses = which(w_LGN_to_V1_i > 0)
+    unrealized_synapses = which(w_LGN_to_V1_i == 0)
+    
+    n_turnover = realized_synapses %>% length() %>% {frac_turnover*.} %>% round()
+    w_LGN_to_V1_i[sample(realized_synapses, n_turnover)] = 0
+    
+    LGN_center_x = LGN_cell_parameters$center_x[unrealized_synapses]
+    LGN_center_y = LGN_cell_parameters$center_y[unrealized_synapses]
+    
+    g = mapply(Gauss, LGN_center_x - V1_center_x, LGN_center_y - V1_center_y, sigma=10)
+    new_synapses = rbinom(length(unrealized_synapses), 1, (n_turnover*g/sum(g))) ####
+    new_synapses = which(new_synapses == 1)
+    new_synapses = unrealized_synapses[new_synapses]
+    w_LGN_to_V1_i[new_synapses] = sample(synaptic_strength_pool, length(new_synapses))
+    w_LGN_to_V1_i
+  })
+}
+```
+
+# Calculation of cell activities
+
+```{r}
+w_LGN_to_V1 %<>% apply(2, function(x) 16.12854*x/sum(x)) #30*x/sum(x))
+w_LGN_to_V1_original = w_LGN_to_V1 ####
+
+y_LGN = response_LGN(stimuli, w_photoreceptors_to_LGN)
+y_V1 = NULL
+for (i in 1:60) {
+  y_V1 = np$dot(y_LGN, w_LGN_to_V1)
+  y_V1 %<>% apply(1, function(x) ifelse(x>.9*max(x), x, 0)) %>% t()
+  
+  synapses = w_LGN_to_V1 > 0
+  dw = np$dot(t(y_LGN), y_V1) * synapses
+  w_LGN_to_V1 = w_LGN_to_V1 + dw
+  w_LGN_to_V1 %<>% apply(2, function(x) 16.12854*x/sum(x))
+  
+  w_LGN_to_V1 = turnover(w_LGN_to_V1, frac_turnover=.1)
+  print(i)
+}
+
+df = 
+  y_V1 %>%
+  as.data.frame() %>%
+  mutate(Theta = all_theta) %>%
+  gather(Cell, Rate, -Theta)
+
+df %>%
+  filter(Cell %in% sample(unique(Cell), 10)) %>%
+  ggplot(aes(Theta, Rate)) +
+  facet_grid(Cell~.) +
+  geom_line(stat="summary", fun.data="mean_se")
+```
+
+# Comparing receptive fields before and after turnover
+
+```{r, fig.height=1, fig.width=2}
+y_V1_original = 
+  np$dot(y_LGN, w_LGN_to_V1_original) %>%
+  apply(1, function(x) ifelse(x>.9*max(x), x, 0)) %>% t()
+
+r = cor(y_V1, y_V1_original)
+
+a = y_V1_original %>% apply(2, function(x) rollmean(x, 170))
+b = y_V1 %>% apply(2, function(x) rollmean(x, 170))
+
+df_preference =
+  data.frame(
+    a = apply(y_V1_original, 2, which.max)/nrow(y_V1)*180-90, 
+    b = apply(y_V1, 2, which.max)/nrow(y_V1)*180-90,
+    active = apply(y_V1, 2, function(x) max(x)>0)
+  ) %>%
+  filter(active) %>%
+  select(a, b)
+
+g1_preference = 
+  df_preference %>%
+  mutate(Shift = {abs(a-b)} %>% ifelse(. > 90, 180-., .)) %>%
+  ggplot(aes(a+90, b+90)) +
+  geom_point(pch=21, fill=NA) +
+  geom_abline(aes(slope=1, intercept=0), lty=2, color="red") +
+  xlab("Original preference [°]") +
+  ylab("Final preference [°]") +
+  labs(color="Shift [°]") +
+  coord_equal() +
+  ylim(0, 180) +
+  xlim(0, 180)
+
+g2_preference = 
+  df_preference %>%
+  mutate(b_shuffle = sample(b)) %>%
+  mutate(
+    Observed = abs(b - a),
+    Shuffled = abs(b_shuffle - a)
+    ) %>%
+  select(Observed, Shuffled) %>%
+  gather(Condition, Shift) %>%
+  mutate(Shift = ifelse(Shift > 90, 180-Shift, Shift)) %>%
+  ggplot(aes(Shift, color=Condition)) +
+  geom_step(stat="ecdf") +
+  xlab("Preference shift [°]") +
+  ylab("Cumulative PDF") +
+  theme(
+    legend.title = element_blank(),
+    legend.position = c(.6, .2),
+    legend.background = element_rect(fill=NA)
+    ) +
+  scale_color_npg() +
+  guides(color=guide_legend(keywidth=.5, keyheight=.5))
+
+plot_grid(g1_preference, g2_preference)
+```
+
+
+# Visualizing receptive fields
+
+```{r}
+V1_cell = sample(which(colSums(y_V1)>0), 1)
+
+x = sapply(1:nrow(stimuli), function(i) {
+  stimuli[i,] * y_V1[i, V1_cell]
+}) %>%
+  t()
+
+g1 =
+  colSums(x) %>% 
+  matrix(100, 100) %>% 
+  melt() %>%
+  ggplot(aes(Var1, Var2, fill=value)) +
+  geom_raster() +
+  scale_fill_gradientn(colors=jet.col()) +
+  coord_equal() +
+  ggtitle("Responses, turnover") +
+  labs(x="X", y="Y", fill="Amplitude")
+
+inputs = which(w_LGN_to_V1[,V1_cell] > 0)
+photoreceptor_fields = w_photoreceptors_to_LGN[,inputs]
+LGN_weights = w_LGN_to_V1[inputs, V1_cell]
+for (i in seq_along(LGN_weights)) {
+  photoreceptor_fields[, i] = photoreceptor_fields[, i] * LGN_weights[i]
+}
+
+g2 =
+  photoreceptor_fields %>% 
+  rowSums() %>% 
+  matrix(100, 100) %>% 
+  melt() %>%
+  ggplot(aes(Var1, Var2, fill=value)) +
+  geom_raster() +
+  scale_fill_gradient2(low="blue", midpoint=0, mid="white", high="red") +
+  coord_equal() +
+  ggtitle("Receptive field, turnover") +
+  labs(x="X", y="Y", fill="Amplitude")
+
+x = sapply(1:nrow(stimuli), function(i) {
+  stimuli[i,] * y_V1_original[i, V1_cell]
+}) %>%
+  t()
+
+g3 =
+  colSums(x) %>% 
+  matrix(100, 100) %>% 
+  melt() %>%
+  ggplot(aes(Var1, Var2, fill=value)) +
+  geom_raster() +
+  scale_fill_gradientn(colors=jet.col()) +
+  coord_equal() +
+  ggtitle("Responses, original") +
+  labs(x="X", y="Y", fill="Amplitude")
+
+inputs = which(w_LGN_to_V1_original[,V1_cell] > 0)
+photoreceptor_fields = w_photoreceptors_to_LGN[,inputs]
+LGN_weights = w_LGN_to_V1_original[inputs, V1_cell]
+for (i in seq_along(LGN_weights)) {
+  photoreceptor_fields[, i] = photoreceptor_fields[, i] * LGN_weights[i]
+}
+
+g4 =
+  photoreceptor_fields %>% 
+  rowSums() %>% 
+  matrix(100, 100) %>% 
+  melt() %>%
+  ggplot(aes(Var1, Var2, fill=value)) +
+  geom_raster() +
+  scale_fill_gradient2(low="blue", midpoint=0, mid="white", high="red") +
+  coord_equal() +
+  ggtitle("Receptive field, original") +
+  labs(x="X", y="Y", fill="Amplitude")
+
+plot_grid(g3, g4, g1, g2)
+```
+
+

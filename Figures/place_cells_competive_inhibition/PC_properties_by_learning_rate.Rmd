@@ -1,0 +1,174 @@
+```{r}
+source("requirements.R")
+source("methods.R")
+source("sim.R")
+```
+
+Define a function to extract place field properties from the output of `sim`.
+
+```{r}
+get_mean_place_field_properties = function(place_cell_list) {
+    centroids_day0 = get_centroids(place_cell_list[[1]]$firing_rates)
+    drift = 
+      sapply(1:length(place_cell_list), function(i) {
+        centroids_day_i = get_centroids(place_cell_list[[i]]$firing_rates)
+        mean(abs(centroids_day_i - centroids_day0), na.rm=T)
+      })
+    
+    median_drift = 
+      sapply(1:length(place_cell_list), function(i) {
+        centroids_day_i = get_centroids(place_cell_list[[i]]$firing_rates)
+        median(abs(centroids_day_i - centroids_day0), na.rm=T)
+      })
+    
+    total_place_cells = 
+      sapply(1:length(place_cell_list), function(i) {
+        get_centroids(place_cell_list[[i]]$firing_rates) %>% 
+          na.omit() %>% 
+          length()
+      })
+    
+    recurring_place_cells = 
+      sapply(1:length(place_cell_list), function(i) {
+        get_centroids(place_cell_list[[i]]$firing_rates) %>% 
+          {.[!is.na(centroids_day0)]} %>%
+          na.omit() %>% 
+          length()
+      })
+    
+    data.frame(
+      Drift = drift,
+      Median_drift = median_drift,
+      Total_PCs = total_place_cells,
+      Recurring_PCs = recurring_place_cells,
+      Day = 0:(length(place_cell_list)-1)
+    )
+}
+```
+
+Run simulations at a wide range of learning rates to evaluate the effects of learning rate on place field properties.
+
+```{r}
+set.seed(3743113)
+
+eta = c(1, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 0) %>% replicate(10, .) %>% c()
+df_by_learning_rate = 
+  sapply(eta, function(eta) {
+    sim(learning_rate=eta, dropout_fun="E%-max") %>%
+      get_mean_place_field_properties() %>%
+      mutate(Eta = eta)
+  }, simplify=F) %>%
+  bind_rows()
+
+# save the result because this simulation is slow
+write.csv(df_by_learning_rate, "../Simulation_data/place_cells_by_learning_rate_052818.csv", row.names=F)
+```
+
+Generate figures showing how place field properties change with the learning rate.
+
+```{r}
+# load the saved result of the above simulation
+df_by_learning_rate = read.csv("../Simulation_data/place_cells_by_learning_rate_052818.csv")
+
+# plot median drift
+g1 = 
+  df_by_learning_rate %>%
+  mutate(Eta = factor(Eta)) %>%
+  ggplot(aes(Day, Median_drift)) +
+  facet_grid(~Eta) +
+  geom_line(aes(group=1), stat="summary", fun.data="mean_se") +
+  geom_errorbar(stat="summary", fun.data="mean_se") +
+  geom_point(size=.1, pch=16, alpha=.5) +
+  annotate("point", x=17.5, y=2.5, shape=13, size=3, color="red") +
+  ylab("Place field drift [cm]") +
+  ggtitle("Learning rate") +
+  theme(plot.title = element_text(hjust=.5, vjust=-1, size=8))
+
+# plot the total number of place cells
+g2 = 
+  df_by_learning_rate %>%
+  mutate(Eta = factor(Eta)) %>%
+  ggplot(aes(Day, Total_PCs)) +
+  geom_abline(slope=0, intercept=400, lty=2, color="red") +
+  geom_abline(slope=0, intercept=200, lty=3, color="red") +
+  facet_grid(~Eta) +
+  geom_line(aes(group=1), stat="summary", fun.data="mean_se") +
+  geom_errorbar(stat="summary", fun.data="mean_se") +
+  geom_point(size=.1, pch=16, alpha=.5) +
+  ylab("Total PCs [count]") +
+  ggtitle("Learning rate") +
+  theme(plot.title = element_text(hjust=.5, vjust=-1, size=8))
+
+# plot the number of recurring place cells
+g3 =
+  df_by_learning_rate %>%
+  mutate(Eta = factor(Eta)) %>%
+  group_by(Eta, replicate_n) %>%
+  ddply(c("Eta", "replicate_n"), function(df) {
+    df$Original = df$Total_PCs[df$Day==0]
+    df
+  }) %>%
+  mutate(Recurring_fraction = Recurring_PCs/Original) %>%
+  ggplot(aes(Day, Recurring_fraction)) +
+  annotate(
+    "line", color="red", lty=2,
+    x=c(0, 5, 10, 15, 20, 25, 30),
+    y=c(1, .25, .20, .18, .15, .14, .13)
+  ) +
+  facet_grid(~Eta) +
+  geom_line(stat="summary", fun.data="mean_se") +
+  geom_errorbar(stat="summary", fun.data="mean_se") +
+  geom_point(size=.1, pch=16, alpha=.5) +
+  labs(y="Recurrence probability", title="Learning rate") +
+  theme(plot.title = element_text(hjust=.5, vjust=-1, size=8))
+```
+
+Run a seperate simulation to find the average synaptic input per place cell at various learning rates.
+
+```{r}
+set.seed(431432)
+
+X = load_input() # grid cells
+
+# run simulation to find average input
+df_mean_input = 
+  sapply(c(0, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1), function(eta) {
+    mean_input =
+      sim(learning_rate=eta, dropout_fun="E%-max") %>%
+      {np$dot(X, .[[61]]$weights)} %>% 
+      colMeans()
+    
+    df = 
+      data.frame(
+        Mean_input = mean_input,
+        Eta = eta
+      )
+    
+    df
+  }, simplify=F) %>%
+    bind_rows()
+
+# plot average synaptic input
+g4 =
+  df_mean_input %>%
+  ggplot(aes(Mean_input)) +
+  facet_grid(~Eta) +
+  geom_histogram(bins=30, fill="black", color=NA) +
+  labs(x="Synaptic input [au]", y="Count", title="Learning rate") +
+  theme(plot.title = element_text(hjust=.5, vjust=-1, size=8))
+```
+
+Generate a figure combining all results.
+
+```{r}
+png("Model2_by_eta.png", width=6.18, height=5.5, units="in", res=300)
+plot_grid(
+  g1, g2, g3, g4, nrow=4,
+  labels = c("A", "B", "C", "D"), label_size = 10
+  )
+dev.off()
+```
+
+
+
+

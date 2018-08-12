@@ -1,0 +1,77 @@
+```{r, fig.height=2, fig.width=6}
+set.seed(412347)
+
+n_cosines = 1200
+eta = 1e-4
+n_outputs = 1
+pretraining = T
+threshold_function = function(x) {x[x - quantile(x, .9) < 0]=0;x}
+
+responses =
+  replicate(
+    10, 
+    {
+      # Initialize inputs and synaptic weights
+      orginal_input_idx = sample(1:10000, n_cosines)
+      input = all_grid_cells[,orginal_input_idx]
+      weights = replicate(n_outputs, sample(synaptic_strength_pool, size=n_cosines, replace=T))
+      replacement_input = all_grid_cells[,new_input_idx]
+      
+      # Activate the output units pre-turnover
+      response = input %*% weights
+      response %<>% apply(2, threshold_function)
+      
+      # Pre-training
+      if (pretraining) {
+        dw = np$dot(t(input), response)
+        weights = weights + eta*dw
+        weights %<>% apply(2, function(x) 148.7*x/sum(x))
+      }
+      
+      response = input %*% weights
+      response %<>% apply(2, threshold_function)
+      
+      response
+    }
+  )
+
+g_rep_place_cells = 
+  responses[,1,] %>% 
+  #{.[.==0]=NA;.} %>%
+  melt() %>%
+  mutate(value=scales::rescale(value, to=c(0, 1))) %>%
+  ggplot(aes(Var1, factor(Var2), fill=value)) +
+  geom_raster() +
+  ylab("Simulation index") +
+  xlab("Position [cm]") +
+  ggtitle("Multiple simulations") +
+  scale_fill_gradientn(colors=plot3D::jet.col(), na.value = "white") +
+  guides(fill=guide_colorbar(barwidth = .5)) +
+  labs(fill="Normalized\nfiring rate")
+
+g_rep_grid_cells =
+  all_grid_cells[,sample(1:10000, 10)] %>% 
+  melt() %>%
+  mutate(value=scales::rescale(value, to=c(0, 1))) %>%
+  ggplot(aes(Var1, factor(Var2), fill=value)) +
+  geom_raster() +
+  ylab("Grid cell index") +
+  xlab("Position [cm]") +
+  ggtitle("Single simulation") +
+  scale_fill_gradientn(colors=plot3D::jet.col(), na.value = "white") +
+  guides(fill=guide_colorbar(barwidth = .5, barheight = 4)) +
+  labs(fill="Normalized\nfiring rate") +
+  theme(legend.background = element_rect(fill=NA, color=NA))
+
+leg = get_legend(g_rep_grid_cells)
+no_leg = theme(legend.position = "none")
+
+g_rep = 
+  ggdraw() +
+    draw_plot(g_rep_grid_cells+no_leg, x=.3, y=0, width=.3, height=1) +
+    draw_plot(g_rep_place_cells+no_leg, x=.6, y=0, width=.3, height=1) +
+    draw_plot(leg, x=.9, y=.2, width=.1, height=.8) +
+    draw_plot_label(label=c("A", "B", "C"), x=c(0, .3,.6), y=c(1, 1, 1), size=10)
+g_rep
+```
+

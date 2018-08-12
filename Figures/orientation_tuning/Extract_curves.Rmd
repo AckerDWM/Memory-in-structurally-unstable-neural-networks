@@ -1,0 +1,79 @@
+```{r, fig.height=.5, fig.width=2}
+y_original = 
+  np$dot(y_LGN, w_LGN_to_V1_original) %>% 
+  apply(1, function(x) ifelse(x>.9*max(x), x, 0)) %>% t()
+y_final = 
+  np$dot(y_LGN, w_LGN_to_V1) %>% 
+  apply(1, function(x) ifelse(x>.9*max(x), x, 0)) %>% t()
+
+df_original = 
+  y_original %>%
+  as.data.frame() %>%
+  mutate(Theta = all_theta) %>%
+  gather(Cell, Rate, -Theta) %>%
+  mutate(Day = "0")
+
+df_final = 
+  y_final %>%
+  as.data.frame() %>%
+  mutate(Theta = all_theta) %>%
+  gather(Cell, Rate, -Theta) %>%
+  mutate(Day = "60")
+
+df = bind_rows(df_original, df_final)
+
+df %<>% 
+  group_by(Cell) %>%
+  mutate(Remove = sum(Rate[Day=="60"]) == 0) %>%
+  filter(Remove == F) %>%
+  ungroup()
+
+df %>%
+  filter(Cell %in% sample(unique(Cell), 5)) %>%
+  mutate(Degrees = (Theta + pi) * (360/(2*pi)) - 90) %>%
+  ggplot(aes(Degrees, Rate, group=Day, color=Day)) +
+  facet_grid(.~Cell) +
+  geom_line(stat="summary", fun.data="mean_se") +
+  theme(panel.spacing = unit(.01, "in"))
+```
+
+```{r, fig.height=2, fig.width=1.4}
+I_original = np$dot(y_LGN, w_LGN_to_V1_original)
+I_final = np$dot(y_LGN, w_LGN_to_V1)
+
+df_original_I = 
+  I_original %>%
+  as.data.frame() %>%
+  mutate(Theta = all_theta) %>%
+  gather(Cell, Rate, -Theta) %>%
+  mutate(Day = "0")
+
+df_final_I = 
+  I_final %>%
+  as.data.frame() %>%
+  mutate(Theta = all_theta) %>%
+  gather(Cell, Rate, -Theta) %>%
+  mutate(Day = "60")
+
+df_I = bind_rows(df_original_I, df_final_I)
+
+df_I %<>% 
+  group_by(Cell, Theta, Day) %>%
+  mutate(Optimal_phase = Rate == max(Rate)) %>%
+  filter(Optimal_phase) %>%
+  ungroup() 
+
+g_curves_I =
+  df_I %>%
+  filter(Cell %in% paste("V", V1_cells, sep="")) %>%
+  mutate(Degrees = (Theta + pi) * (360/(2*pi)) - 90) %>%
+  ggplot(aes(Degrees, Rate, group=Day, color=Day)) +
+  facet_grid(Cell~.) +
+  geom_line(stat="summary", fun.data="mean_se") +
+  scale_x_continuous(breaks=c(0, 45, 90, 135, 180)) +
+  scale_color_manual(values=c("blue3", "red3")) +
+  ylab("Synaptic input")
+
+g_curves_I
+```
+

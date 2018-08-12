@@ -1,0 +1,43 @@
+```{r}
+library(akima)
+
+grided =
+  df_result_indegree %>%
+  filter(reactivation==100) %>%
+  filter(indegree<500) %$%
+  interp(
+    x=sqrt(indegree), y=turnover_rate, z=r, 
+    extrap=TRUE, duplicate="mean", 
+    nx=40, ny=50
+    )
+
+image(grided$z, col=jet.colors(255))
+
+df_indegree_grid = 
+  grided$z %>%
+  as.data.frame() %>%
+  {names(.)=grided$y;.} %>%
+  mutate(indegree = grided$x^2) %>%
+  tidyr::gather(turnover_rate, r, -indegree) %>%
+  mutate(turnover_rate = turnover_rate %>% as.character() %>% as.numeric())
+```
+
+
+```{r}
+g_indegree =
+  ggplot(df_indegree_grid, aes(indegree, turnover_rate*100, fill=r)) +
+  geom_raster() +
+  scale_fill_gradientn(colors=plot3D::jet.col(), na.value="white", limits=c(-.5, 1)) +
+  scale_y_continuous(limits=c(0, 100)) +
+  scale_x_sqrt(breaks=c(10, 100, 500)) +
+  labs(x="Median in-degree", y="Turnover rate [%]", fill="Attractor\nintegrity") +
+  theme(
+    legend.margin = margin(0,0,0,0),
+    legend.box.margin = margin(0,0,0,0)
+    ) +
+  guides(fill=guide_colorbar(barwidth = .5))
+g_indegree
+```
+
+
+
