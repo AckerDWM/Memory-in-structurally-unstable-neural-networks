@@ -1,3 +1,10 @@
+
+This file is meant to be run after `Orientation Tuning Notebook.Rmd` and relies on variable and dependencies described and instantiated there.
+
+Show firing rates by orientation for simulated V1 neurons. The resulting dataframe will be used to generate final figures. 
+
+*Note that day 60 in this file is later interpretted as day 118 in other R script files and in the manuscript.*
+
 ```{r, fig.height=.5, fig.width=2}
 y_original = 
   np$dot(y_LGN, w_LGN_to_V1_original) %>% 
@@ -22,12 +29,14 @@ df_final =
 
 df = bind_rows(df_original, df_final)
 
+# filter out neurons that weren't active on the last day
 df %<>% 
   group_by(Cell) %>%
   mutate(Remove = sum(Rate[Day=="60"]) == 0) %>%
   filter(Remove == F) %>%
   ungroup()
 
+# show some example neurons
 df %>%
   filter(Cell %in% sample(unique(Cell), 5)) %>%
   mutate(Degrees = (Theta + pi) * (360/(2*pi)) - 90) %>%
@@ -36,6 +45,8 @@ df %>%
   geom_line(stat="summary", fun.data="mean_se") +
   theme(panel.spacing = unit(.01, "in"))
 ```
+
+Show synaptic input (current) by orientation for simulated V1 neurons on days zero. The resulting dataframe will be used to generate final figures.
 
 ```{r, fig.height=2, fig.width=1.4}
 I_original = np$dot(y_LGN, w_LGN_to_V1_original)
@@ -57,12 +68,14 @@ df_final_I =
 
 df_I = bind_rows(df_original_I, df_final_I)
 
+# filter out neurons that weren't active on the last day
 df_I %<>% 
   group_by(Cell, Theta, Day) %>%
   mutate(Optimal_phase = Rate == max(Rate)) %>%
   filter(Optimal_phase) %>%
   ungroup() 
 
+# show some example neurons
 g_curves_I =
   df_I %>%
   filter(Cell %in% paste("V", V1_cells, sep="")) %>%

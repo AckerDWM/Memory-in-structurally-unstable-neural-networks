@@ -1,0 +1,60 @@
+
+This file is meant to be run after `Orientation Tuning Notebook.Rmd` and relies on variable and dependencies described and instantiated there.
+
+Generate receptive fields for example simulated V1 neurons. This method was replaced in the manuscript with a newer method that is more consistent with in vivo methods of calculating receptive fields. Refer to `spots_and_figure.Rmd` for the final method. This method was used early on because it is fast.
+
+```{r}
+V1_cells = sample(which(colSums(y_V1)>0), 3)
+
+df_receptive_field_original =
+  sapply(V1_cells, function(V1_cell) {
+    inputs = which(w_LGN_to_V1_original[,V1_cell] > 0)
+    photoreceptor_fields = w_photoreceptors_to_LGN[,inputs]
+    LGN_weights = w_LGN_to_V1_original[inputs, V1_cell]
+    for (i in seq_along(LGN_weights)) {
+      photoreceptor_fields[, i] = photoreceptor_fields[, i] * LGN_weights[i]
+    }
+    
+    photoreceptor_fields %>% 
+      rowSums() %>% 
+      matrix(100, 100) %>% 
+      melt() %>%
+      mutate(Cell=V1_cell)
+  }, simplify=F) %>%
+    bind_rows() %>%
+  mutate(Day = "0")
+
+df_receptive_field_final =
+  sapply(V1_cells, function(V1_cell) {
+    inputs = which(w_LGN_to_V1[,V1_cell] > 0)
+    photoreceptor_fields = w_photoreceptors_to_LGN[,inputs]
+    LGN_weights = w_LGN_to_V1[inputs, V1_cell]
+    for (i in seq_along(LGN_weights)) {
+      photoreceptor_fields[, i] = photoreceptor_fields[, i] * LGN_weights[i]
+    }
+    
+    photoreceptor_fields %>% 
+      rowSums() %>% 
+      matrix(100, 100) %>% 
+      melt() %>%
+      mutate(Cell=V1_cell)
+  }, simplify=F) %>%
+    bind_rows() %>%
+  mutate(Day = "118")
+
+df_receptive_field = bind_rows(df_receptive_field_original, df_receptive_field_final)
+
+g_receptive_field = 
+  ggplot(df_receptive_field, aes(Var1, Var2, fill=value)) +
+  facet_grid(Day~Cell, labeller=label_both) +
+  geom_raster() +
+  scale_fill_gradient2(low="blue", midpoint=0, mid="white", high="red") +
+  coord_equal() +
+  labs(x="X-position [px]", y="Y-position [px]", fill="Amp.") +
+  guides(fill=guide_colorbar(barwidth = .5, barheight=3)) +
+  scale_x_continuous(breaks=c(25, 75)) +
+  scale_y_continuous(breaks=c(25, 75)) +
+  theme(legend.position = "right")
+
+g_receptive_field
+```

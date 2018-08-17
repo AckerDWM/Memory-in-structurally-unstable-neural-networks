@@ -7,6 +7,10 @@ output: html_notebook
 
 An orientation tuning model building on a `Biol Cybern (2012) 106:177–189`. This is a model of V1 simple cells receiving input from on and off center LGN cells.
 
+```{r}
+source("imports.R")
+```
+
 # Random seed for the simulation
 
 ```{r}

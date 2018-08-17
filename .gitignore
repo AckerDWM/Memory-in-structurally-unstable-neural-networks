@@ -31,3 +31,4 @@
 ./.git/objects/pack/pack-c8dceee2430f3a4529b897b0be61d3ba2369bb45.pack
 ./simulation_code/orientation_tuning/w_photoreceptors_to_LGN.csv
 ./simulation_code/orientation_tuning/.RData
+.Rproj.user
